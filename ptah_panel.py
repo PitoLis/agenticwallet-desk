@@ -96,8 +96,8 @@ def gmgn_token_info(token):
     return {'success': True, 'data': out}
 
 
-def run_node(script, arg, timeout=35):
-    p = subprocess.run(["node", str(Path(__file__).with_name(script)), arg],
+def run_node(script, *args, timeout=35):
+    p = subprocess.run(["node", str(Path(__file__).with_name(script)), *args],
                        capture_output=True, text=True, timeout=timeout, env=_env())
     if p.returncode != 0 and not p.stdout.strip():
         raise RuntimeError(p.stderr.strip() or "脚本执行失败")
@@ -153,6 +153,14 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(run_baw(['market-order', 'list', '--orderId', oid]))
         if path == '/orders':
             return self.send(run_baw(['market-order', 'list', '--binanceChainId', CHAIN, '--pageSize', '15']))
+        if path == '/route':
+            token = query.get('token', [''])[0]
+            if not valid_token(token):
+                return self.send({'success': False, 'error': {'message': 'Invalid token address'}}, 400)
+            try:
+                return self.send(run_node('routes.mjs', 'detect', token, timeout=30))
+            except Exception as e:
+                return self.send({'success': False, 'error': {'message': str(e)}}, 502)
         if path == '/status':
             sp = Path.home() / '.config/four-watch-status.json'
             try:
@@ -236,6 +244,35 @@ class Handler(BaseHTTPRequestHandler):
                         raise ValueError()
                 except (InvalidOperation, ValueError, TypeError):
                     return self.send({'success': False, 'error': {'message': '滑点需为 auto 或 0–100'}}, 400)
+            # Direct-contract launchpads (AgentPad/Gang/MOAT/Flap Agent/UNITS) that the
+            # baw aggregator can't route: one side must be BNB, the other the curve token.
+            side = 'buy' if source.lower() == BNB.lower() else ('sell' if target.lower() == BNB.lower() else None)
+            curve_token = target if side == 'buy' else source if side == 'sell' else None
+            if curve_token:
+                try:
+                    rt = run_node('routes.mjs', 'detect', curve_token, timeout=30)
+                except Exception:
+                    rt = None
+                if rt and rt.get('success') and rt['data'].get('venue') == 'direct':
+                    slip = '10' if sl == 'auto' else str(sl)
+                    amt = 'all' if (side == 'sell' and d.get('all')) else qty
+                    if self.path == '/quote':
+                        q = run_node('routes.mjs', 'quote', curve_token, side, amt, timeout=40)
+                        if not q.get('success'):
+                            return self.send(q)
+                        x = q['data']
+                        sym_in = 'BNB' if side == 'buy' else (x.get('symbol') or d.get('fromSymbol') or 'TOKEN')
+                        sym_out = (x.get('symbol') or d.get('toSymbol') or 'TOKEN') if side == 'buy' else 'BNB'
+                        return self.send({'success': True, 'data': {
+                            'fromCoinSymbol': sym_in, 'fromCoinAmount': qty,
+                            'toCoinSymbol': sym_out, 'toCoinAmount': x.get('outHuman', '0'),
+                            'slippage': float(slip) / 100, 'route': x.get('route'), 'note': x.get('note', ''), 'venue': 'direct'}})
+                    t = run_node('routes.mjs', 'trade', curve_token, side, amt, slip, timeout=150)
+                    if t.get('success'):
+                        res = t['data'].get('result') or {}
+                        t['data']['txHash'] = res.get('txHash') if isinstance(res, dict) else None
+                        t['data']['venue'] = 'direct'
+                    return self.send(t)
             args = ['market-order', 'quote' if self.path == '/quote' else 'swap',
                     '--binanceChainId', CHAIN, '--fromTokenQty', qty,
                     '--fromToken', source, '--toToken', target, '--slippage', str(sl)]

@@ -25,6 +25,10 @@ const DEFAULT_TOKENS = [
 ];
 const KNOWN = {};
 for (const t of DEFAULT_TOKENS) KNOWN[t.address.toLowerCase()] = {decimals: 18, ...t, symbolShort: t.symbol};
+const PLATFORM_NAMES = {
+  fourmeme: 'four.meme', flap: 'Flap', flapagent: 'Flap Agent', agentpad: 'AgentPad', gang: 'Gang',
+  gangpair: 'Gang Pair', moat: 'MOAT', units: 'UNITS', pancake: '外盘 PancakeSwap',
+};
 const PAIRS = [['USDT', 'BNB', 'USDT → BNB'], ['BNB', 'USDT', 'BNB → USDT']];
 
 const state = {
@@ -69,7 +73,33 @@ function renderPairs() {
     $('pairs').appendChild(b);
   }
 }
-function afterPairChange() { renderTokButtons(); ensureMeta([state.from, state.to]); scheduleQuote(); refreshTokenCard(); }
+function afterPairChange() { renderTokButtons(); ensureMeta([state.from, state.to]); scheduleQuote(); refreshTokenCard(); refreshRoute(); }
+
+// Detect which launchpad a non-base token belongs to and badge it.
+let routeSeq = 0;
+async function refreshRoute() {
+  const el = $('routeBadge'), token = activeCustomToken();
+  if (!token) { el.textContent = 'Binance 聚合'; el.className = 'route-badge'; return; }
+  const seq = ++routeSeq; el.textContent = '识别平台…'; el.className = 'route-badge';
+  try {
+    const x = await (await fetch('/route?token=' + encodeURIComponent(token))).json();
+    if (seq !== routeSeq) return;
+    const r = x.data || {}, name = PLATFORM_NAMES[r.platform] || r.platform || '未知';
+    el.textContent = r.venue === 'direct' ? `${name} · 曲线直调` : `${name} · 聚合路由`;
+    el.className = 'route-badge ' + (r.venue === 'direct' ? 'direct' : 'agg');
+  } catch { if (seq === routeSeq) el.textContent = '平台未识别'; }
+}
+
+// Direct-contract trades bypass baw's order book, so keep a local log and merge it into history.
+const DIRECT_KEY = 'agentdesk.directTrades';
+function loadDirect() { try { return JSON.parse(localStorage.getItem(DIRECT_KEY) || '[]'); } catch { return []; } }
+function recordDirect(t) {
+  const fi = tokenInfo(t.from), ti = tokenInfo(t.to);
+  const row = {orderId: t.txHash, fromToken: t.from, toToken: t.to, fromTokenName: sym(fi), toTokenName: sym(ti),
+    fromTokenQty: t.qty, toTokenActualQty: null, status: 'FINISHED', txHash: t.txHash,
+    bookTime: new Date().toISOString(), platform: t.platform, direct: true};
+  localStorage.setItem(DIRECT_KEY, JSON.stringify([row, ...loadDirect()].slice(0, 100)));
+}
 
 // ---------- views ----------
 function showView(v) {
@@ -124,6 +154,7 @@ function renderBalances() {
   }
 }
 function usePct(frac) {
+  state.allSelected = frac === 1;
   const k = state.from.toLowerCase(), raw = state.balances[k];
   if (raw == null) return;
   let avail = parseFloat(raw);
@@ -170,7 +201,7 @@ async function getQuote() {
   setStatus('获取报价…', true);
   try {
     const x = await (await fetch('/quote', {method: 'POST', headers: {'content-type': 'application/json'},
-      body: JSON.stringify({fromToken: state.from, toToken: state.to, qty: amt, slippage: state.slippage})})).json();
+      body: JSON.stringify({fromToken: state.from, toToken: state.to, qty: amt, slippage: state.slippage, fromSymbol: sym(tokenInfo(state.from)), toSymbol: sym(tokenInfo(state.to))})})).json();
     if (seq !== state.quoteSeq) return;
     if (!x.success) throw Error(x.error?.message || '报价失败');
     state.quote = x.data; $('toAmt').value = trim(x.data.toCoinAmount);
@@ -186,6 +217,9 @@ function renderQuote(d, payAmt) {
   const pct = slip * 100, el = $('qImpact');
   el.textContent = pct ? pct.toFixed(2) + '%（滑点上限）' : '自动';
   el.className = 'impact ' + (pct <= 1 ? 'lo' : pct <= 5 ? 'mid' : 'hi');
+  const r = d.route, plat = r ? (PLATFORM_NAMES[r.platform] || r.platform) : '';
+  $('qRoute').textContent = d.venue === 'direct' ? `${plat} 曲线直调` : (plat ? `Binance 聚合 · ${plat}` : 'Binance 聚合');
+  $('qNote').textContent = d.note || ''; $('qNote').style.display = d.note ? '' : 'none';
   $('quoteBox').classList.add('show');
 }
 
@@ -206,8 +240,14 @@ async function doSwap() {
   const t0 = performance.now();
   try {
     const x = await (await fetch('/swap', {method: 'POST', headers: {'content-type': 'application/json'},
-      body: JSON.stringify({fromToken: state.from, toToken: state.to, qty: amt, slippage: state.slippage, gasLevel: state.gas})})).json();
+      body: JSON.stringify({fromToken: state.from, toToken: state.to, qty: amt, slippage: state.slippage, gasLevel: state.gas, all: !!state.allSelected})})).json();
     if (!x.success) throw Error(x.error?.message || '提交失败');
+    if (x.data.venue === 'direct') {
+      const h = x.data.txHash;
+      setStatus(h ? `已上链：${h.slice(0, 10)}… · ${sec(t0)}` : `已提交 · ${sec(t0)}`, false);
+      if (h) recordDirect({txHash: h, side: state.from.toLowerCase() === BNB.toLowerCase() ? 'buy' : 'sell', from: state.from, to: state.to, qty: amt, platform: x.data.route?.platform});
+      return;
+    }
     const id = x.data.orderId;
     setStatus('已提交订单 ' + id + '，等待确认…', true);
     for (let i = 0; i < 24; i++) {
@@ -356,11 +396,11 @@ function renderHistory(list, boxId) {
   box.innerHTML = '';
   const base = [BNB.toLowerCase(), USDT.toLowerCase()];
   for (const o of list) {
-    const got = o.status === 'FINISHED' ? trim(o.toTokenActualQty) : '…';
+    const got = o.direct ? '' : (o.status === 'FINISHED' ? trim(o.toTokenActualQty) : '…');
     // the tradable (meme) side — whichever leg isn't BNB/USDT — is the CA worth copying
     const ca = [o.toToken, o.fromToken].find(a => a && !base.includes(a.toLowerCase())) || o.toToken || o.fromToken;
     const el = document.createElement('div'); el.className = 'li';
-    el.innerHTML = `<div style="min-width:0"><div class="pair-l">${trim(o.fromTokenQty)} ${o.fromTokenName} → ${got} ${o.toTokenName}</div>`
+    el.innerHTML = `<div style="min-width:0"><div class="pair-l">${trim(o.fromTokenQty)} ${o.fromTokenName} → ${got} ${o.toTokenName}${o.direct ? ` <span class="ptag">${PLATFORM_NAMES[o.platform] || o.platform}</span>` : ''}</div>`
       + `<div class="meta">${(o.bookTime || '').replace('T', ' ').slice(0, 19)}`
       + (o.txHash ? ` · <a href="https://bscscan.com/tx/${o.txHash}" target="_blank" rel="noopener">链上</a>` : '') + `</div></div>`
       + `<div style="display:flex;align-items:center;gap:8px;flex:none">`
@@ -386,7 +426,8 @@ async function loadHistory() {
   try {
     const x = await (await fetch('/orders')).json();
     if (!x.success) throw Error(x.error?.message || '读取失败');
-    renderHistory(x.data?.list || [], 'hist'); renderHistory(x.data?.list || [], 'hist2');
+    const merged = [...(x.data?.list || []), ...loadDirect()].sort((a, b) => String(b.bookTime).localeCompare(String(a.bookTime)));
+    renderHistory(merged, 'hist'); renderHistory(merged, 'hist2');
   } catch (e) { const m = '<div class="empty">历史读取失败：' + e.message + '</div>'; if ($('hist')) $('hist').innerHTML = m; if ($('hist2')) $('hist2').innerHTML = m; }
 }
 function renderAlerts(list, boxId) {
@@ -460,7 +501,7 @@ async function preflight() {
 function bootstrap() {
   drawBlockies('0x0000000000000000000000000000000000000000');
   renderTokButtons(); renderPairs();
-  $('fromAmt').addEventListener('input', scheduleQuote);
+  $('fromAmt').addEventListener('input', () => { state.allSelected = false; scheduleQuote(); });
   $('slipCustom').addEventListener('input', () => {
     const v = $('slipCustom').value.trim();
     if (v && parseFloat(v) > 0 && parseFloat(v) <= 100) { state.slippage = v; [...$('slipSeg').children].forEach(b => b.classList.remove('on')); $('slipLabel').textContent = v + '%'; scheduleQuote(); }

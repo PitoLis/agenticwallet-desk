@@ -45,8 +45,34 @@ four_watch.mjs  (独立后台进程)
 | `token_meta.mjs` | 任意代币的链上 name/symbol/decimals/balance + 钱包余额 |
 | `openfour_check.mjs` | Four.meme V12 模板只读核查（注册/preset/NFT/能否买模拟） |
 | `four_watch.mjs` | 抢购监控 + 自动买入 + 10 倍提醒 + 状态/事件落盘 |
+| `routes.mjs` | 平台识别 + 曲线直调（AgentPad/Gang/MOAT/Flap Agent/UNITS）买卖适配 |
 
 ---
+
+## 支持的平台（路由）
+
+粘贴任意代币 CA，面板会自动识别它属于哪个平台，并选择路由（兑换卡标题旁的徽章显示结果）：
+
+| 平台 | 识别方式 | 路由 | 说明 |
+|---|---|---|---|
+| four.meme（含 V12 / Agent 专属测试版） | 尾号 `4444` / `ffff` | Binance 聚合（baw） | Agent 专属模板需 Agent ID NFT + 模板白名单 |
+| Flap（flap.sh） | 尾号 `7777` / `8888` | Binance 聚合（baw） | |
+| 外盘（PancakeSwap） | 其余已上 DEX 的币 | Binance 聚合（baw） | |
+| AgentPad（agentpad.trade） | 各 Factory `isToken(ca)` | 曲线直调 | `buyWithBNBMinOut` / `sellWithMin`，需 Agent ID |
+| Gang（gang.fun） | Soft pad `curves(ca)` | 曲线直调 | `buy(token,minOut)` 付 BNB / `sell`，需 Agent ID，单钱包上限 1% |
+| MOAT 曲线（moat.fun） | 曲线 pad `curves(ca)` | 曲线直调 | 同 Gang 接口 |
+| Flap Agent 曲线（flap.sh） | Agent Factory `marketOfToken(ca)` | 曲线直调 | 买到的是曲线份额（非 ERC20），毕业后 claim；仅支持 BNB 计价市场 |
+| UNITS（units-agentic.fun） | 精确匹配代币地址 | 曲线直调 | `buy` / `sell` |
+| Gang Pair / Gang V2 | V2 pad `curves(ca)` | 暂不支持自动交易 | 以 ERC20（bStocks / GANG / WBNB）计价，需先换出报价代币并授权 |
+| MOAT 占席（fair slot） | moat.fun board `mode=fair` | 暂未接入 | `fillSlot` 按席位定额付款，窗口期不可卖 |
+
+「火箭交易」未找到对应的独立平台或合约，未接入。
+
+**曲线直调的安全模型**：`routes.mjs` 只负责拼 calldata。每笔交易都先 `baw contract-call preview`（钱包后端模拟），通过后才 `execute`。卖出前的授权是单独一笔 `approve`，额度精确等于本次卖出数量，不做无限授权。滑点保护：买卖都按报价算 `minOut`，`auto` 滑点在曲线路由上默认 10%。
+
+**直调交易的记录**：直调交易不经过 baw 的订单簿，面板在浏览器 localStorage 里另存一份，和 baw 订单合并显示在历史记录里，带平台标签和 Tx 链接。
+
+新增平台：在 `routes.mjs` 的 `PLATFORMS` 加合约地址，在 `detect()` 加识别规则，在 `quote()` / `trade()` 加对应的报价和买卖调用即可（见下方 DIY 指南 B）。
 
 ## 依赖与前置
 
@@ -90,6 +116,7 @@ NODE_USE_ENV_PROXY=1 FOUR_ARM=1 FOUR_BUDGET_BNB=0.01 node four_watch.mjs
 | GET | `/meta?tokens=a,b` | 钱包余额 + 代币链上元数据 |
 | GET | `/tokeninfo?token=` | GMGN 行情/logo/税/风险 |
 | GET | `/orders` · `/order?id=` | 订单历史 / 单条 |
+| GET | `/route?token=` | 识别代币所属平台和路由 |
 | GET | `/status` | 监控状态（面板仪表盘读） |
 | GET | `/events` | 买入/10倍事件 |
 | POST | `/quote` · `/swap` | 报价 / 下单（body: fromToken,toToken,qty,slippage,gasLevel） |

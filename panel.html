@@ -111,6 +111,11 @@ main{position:relative;z-index:1;max-width:1180px;margin:0 auto;padding:clamp(20
   background:linear-gradient(135deg,var(--gold-soft),var(--surface-2));cursor:pointer;display:grid;place-items:center;
   color:var(--gold-deep);box-shadow:var(--shadow);transition:transform .25s,box-shadow .2s;font-size:15px}
 .flip:hover{transform:rotate(180deg);box-shadow:var(--shadow-gold)}
+.route-badge{font-size:11px;font-weight:650;padding:3px 9px;border-radius:999px;margin-left:8px;vertical-align:middle;letter-spacing:0;background:var(--surface-2);border:1px solid var(--line);color:var(--muted)}
+.route-badge.direct{background:var(--gold-soft);border-color:var(--gold-line);color:var(--gold-deep)}
+.route-badge.agg{background:oklch(95% .03 150);border-color:oklch(85% .06 150);color:var(--up)}
+.qnote{font-size:11px;color:var(--warn);margin-top:6px;line-height:1.5}
+.ptag{font-size:10px;font-weight:650;padding:2px 7px;border-radius:999px;background:var(--gold-soft);color:var(--gold-deep);margin-left:4px}
 .pcts{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-top:12px}
 .pcts button{border:1px solid var(--line);background:var(--surface);color:var(--muted);border-radius:8px;padding:7px 0;font:inherit;font-size:12px;font-weight:650;cursor:pointer;transition:.15s}
 .pcts button:hover{border-color:var(--gold-line);color:var(--gold-deep);background:var(--gold-soft)}
@@ -261,7 +266,7 @@ dialog::backdrop{background:oklch(40% .03 70/.3);backdrop-filter:blur(3px)}
     <div class="grid-2">
       <section class="card gold pad">
         <div class="swap-top">
-          <span class="t">兑换</span>
+          <span class="t">兑换 <span class="route-badge" id="routeBadge">Binance 聚合</span></span>
           <button class="ghost" id="gear" onclick="toggleSettings()">滑点 <b id="slipLabel">自动</b> ▾</button>
         </div>
         <div class="settings" id="settings">
@@ -306,9 +311,11 @@ dialog::backdrop{background:oklch(40% .03 70/.3);backdrop-filter:blur(3px)}
 
         <div class="pairs" id="pairs"></div>
         <div class="qbox" id="quoteBox">
+          <div class="qrow"><span>路由</span><b id="qRoute">—</b></div>
           <div class="qrow"><span>汇率</span><b id="qRate">—</b></div>
           <div class="qrow"><span>最小到账（滑点后）</span><b id="qMin">—</b></div>
           <div class="qrow"><span>价格影响</span><b id="qImpact" class="impact">—</b></div>
+          <div class="qnote" id="qNote" style="display:none"></div>
         </div>
         <button class="cta" id="cta" onclick="doSwap()" disabled>输入数量</button>
         <div class="status" id="status"><span class="spin"></span><span id="statusText">准备就绪</span></div>
