@@ -364,21 +364,22 @@ function renderHistory(list, boxId) {
       + `<div class="meta">${(o.bookTime || '').replace('T', ' ').slice(0, 19)}`
       + (o.txHash ? ` · <a href="https://bscscan.com/tx/${o.txHash}" target="_blank" rel="noopener">链上</a>` : '') + `</div></div>`
       + `<div style="display:flex;align-items:center;gap:8px;flex:none">`
-      + (ca && !base.includes(ca.toLowerCase()) ? `<button class="copyca" title="复制该代币合约 / 点按载入兑换" data-ca="${ca}">复制CA</button>` : '')
+      + (ca && !base.includes(ca.toLowerCase()) ? `<button class="copyca" title="复制该代币合约 / 双击载入兑换" data-ca="${ca}">复制CA</button>` : '')
+      + (o.txHash ? `<a class="copyca hashlink" href="https://bscscan.com/tx/${o.txHash}" target="_blank" rel="noopener" title="${o.txHash}">Tx ↗</a>` : '')
       + `<span class="st st-${o.status}">${o.status}</span></div>`;
     box.appendChild(el);
   }
-  for (const b of box.querySelectorAll('.copyca')) b.onclick = () => copyCA(b.dataset.ca, b);
+  for (const b of box.querySelectorAll('.copyca[data-ca]')) b.onclick = () => copyText(b.dataset.ca, b);
 }
-async function copyCA(ca, btn) {
-  try { await navigator.clipboard.writeText(ca); }
-  catch { const t = document.createElement('textarea'); t.value = ca; document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove(); }
+async function copyText(text, btn) {
+  try { await navigator.clipboard.writeText(text); }
+  catch { const t = document.createElement('textarea'); t.value = text; document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove(); }
   const old = btn.textContent; btn.textContent = '已复制'; btn.classList.add('ok');
   setTimeout(() => { btn.textContent = old; btn.classList.remove('ok'); }, 1400);
 }
-// double-click a copy button loads that CA straight into the swap's "receive" side
+// double-click a CA button loads that token straight into the swap's "receive" side
 document.addEventListener('dblclick', e => {
-  const b = e.target.closest?.('.copyca'); if (!b) return;
+  const b = e.target.closest?.('.copyca[data-ca]'); if (!b) return;
   state.to = b.dataset.ca; showView('swap'); afterPairChange();
 });
 async function loadHistory() {
