@@ -11,7 +11,7 @@
 1. **聚合兑换**：任意代币互换、USDT⇄BNB 快捷对、方向反转、滑点/Gas 设置、实时报价、价格影响、25%/50%/75%/最大 百分比快捷填入、订单历史。
 2. **代币信息展示**：输入合约地址即展示该币的 logo、名称、价格、市值、流动性、持有人、买卖税、貔貅/rug 风险徽章。代币选择器里"搜到即展示内容"，不是裸导入。
 3. **Four.meme 新币抢购监控 + 自动买入**：事件驱动监听指定模板的新币，命中后自动用固定 BNB 预算买入；买不进（白名单/revert）自动跳过下一个；买到后桌面弹窗 + 面板事件；持仓到 10 倍弹窗提醒（只提醒不自动卖）。
-4. **三视图面板**：兑换 / 抢购监控 / 记录；钱包 blockies 几何 logo；监控状态仪表盘（live/armed、模板、预算、最新区块、已买/已跳/WSS/心跳）。
+4. **三视图面板**：兑换 / 抢购监控 / 记录；钱包 blockies 几何 logo；监控状态仪表盘（live/实盘、模板、预算、最新区块、已买/已跳/WSS/心跳）。
 
 **硬约束**：面板不持有私钥。所有签名、授权、风控、广播都委托本机已登录的钱包 CLI（见下）。面板只做只读查询 + 发起交易请求。
 
@@ -71,7 +71,7 @@ ThreadingHTTPServer + 一个 Handler。安全：POST 校验 Origin 为 127.0.0.1
   - preview 失败（白名单 revert 等）→ 记 `skipped`，**跳下一个，不重试**。
 - 排除已知测试代币；买过的不重买；买卖都用 preview 先验证。
 - 买到后记录入场价（走 gmgn-cli 实时价，链上 estimate 在低流动性会返 0 不可靠）；独立循环轮询持仓价，到 10 倍写事件 + 桌面通知（只提醒不卖）。
-- 环境变量：`FOUR_ARM=1`（真买，否则演练）、`FOUR_BUDGET_BNB`（默认 0.01）、`FOUR_PRESET`、`FOUR_SCAN_MIN_MS`、`FOUR_FALLBACK_MS`。
+- 环境变量：`FOUR_ARM=1`（实盘，否则模拟）、`FOUR_BUDGET_BNB`（默认 0.01）、`FOUR_PRESET`、`FOUR_SCAN_MIN_MS`、`FOUR_FALLBACK_MS`。
 - 状态写 `~/.config/four-watch-status.json`：`{ts,pid,armed,budgetBnb,preset,presetName,head,bought,skipped,wss}`。事件写 `~/.config/four-watch-events.json`（数组，最多 100 条，新的在前）。
 
 ### 5. `panel.html` + `panel.js` — 前端（见第五节设计）
@@ -98,7 +98,7 @@ ThreadingHTTPServer + 一个 Handler。安全：POST 校验 Origin 为 127.0.0.1
 - **调色（OKLCH 推理，输出可用 hex/oklch）**：暖象牙白底（非纯白），纯白卡片浮起，极细暖灰半透明描边 + 柔投影；主强调 = 香槟金/古铜金（CTA、选中态、logo、活跃态金边），涨=克制绿、跌=克制红；不用纯 #fff/#000，中性色微偏暖。固定 SVG feTurbulence 颗粒底纹 opacity≈0.03 压扁矢量感。标题负字距、紧行高；所有数字 `font-variant-numeric: tabular-nums`。
 - **顶栏**：钱包地址生成的 blockies 几何 logo（canvas，金色系调色板，8×8 对称）；三视图导航「兑换 / 抢购监控 / 记录」带金色下划线高亮；右上监控状态 chip（live→金/绿点，armed→金底，离线→红点）。favicon 用同系金色几何方块 SVG 内嵌进 `<head>`。
 - **兑换视图**：金边主卡（支付腿 + 反转按钮 + 收到腿）；支付腿下 25%/50%/75%/最大 四个比例按钮（按余额比例填入，原生 BNB 先扣 0.001 gas 预留再乘比例）；USDT→BNB / BNB→USDT 快捷对；滑点(自动/0.5/1/3/自定义)与 Gas(低/中/高) 折叠设置；输入防抖 380ms 自动报价，显示汇率/最小到账/价格影响；下方代币信息卡（logo/价格/市值/流动性/持有人/买卖税 + 风险徽章）。右列钱包余额 + 最近兑换。
-- **监控视图**：仪表盘卡（靶心图标 + 武装/演练 + 运行药丸、模板名+preset、预算金色、最新区块、已买/已跳/WSS/心跳，数据从 /status 每 6 秒刷）；事件流（买入✅/10倍🚀，带 bscscan 链接）；Four.meme 只读核查输入框。
+- **监控视图**：仪表盘卡（靶心图标 + 实盘/模拟 + 运行药丸、模板名+preset、预算金色、最新区块、已买/已跳/WSS/心跳，数据从 /status 每 6 秒刷）；事件流（买入✅/10倍🚀，带 bscscan 链接）；Four.meme 只读核查输入框。
 - **记录视图**：兑换历史 + 监控事件两栏。
 - **代币选择器 dialog（关键交互）**：输入框粘贴完整 0x 地址 → 立即并行拉 /meta + /tokeninfo → 在弹窗内渲染**富信息卡**（logo、名称·符号、地址+launchpad、价格/流动性/余额/市值/买卖税、风险徽章、金色"选择 XXX"按钮），而不是一行"导入"。非地址输入则按名称/符号过滤已知代币列表。选中后缓存进已知列表。
 - 无障碍：焦点态可见、对比度达标、`prefers-reduced-motion` 关动画、移动端单列。
@@ -112,7 +112,7 @@ ThreadingHTTPServer + 一个 Handler。安全：POST 校验 Origin 为 127.0.0.1
 npm i ws@8
 # 2. 起面板
 NODE_USE_ENV_PROXY=1 python3 ptah_panel.py        # http://127.0.0.1:8787
-# 3. 起监控（演练先 FOUR_ARM 不设；确认无误再 =1 真买）
+# 3. 起监控（先模拟：FOUR_ARM 不设；确认无误再 =1 切实盘）
 GMGN_API_KEY=$(grep GMGN_API_KEY ~/.config/gmgn/.env|cut -d= -f2) \
 NODE_USE_ENV_PROXY=1 FOUR_ARM=1 FOUR_BUDGET_BNB=0.01 node four_watch.mjs
 ```

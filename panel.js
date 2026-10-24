@@ -459,14 +459,14 @@ async function loadStatus() {
     const live = x.data?.live, st = x.data?.status || {};
     const chip = $('monChip');
     chip.className = 'chip' + (live ? (st.armed ? ' armed' : ' live') : ' off');
-    $('monChipText').textContent = live ? (st.armed ? '监控·武装' : '监控·演练') : '监控离线';
+    $('monChipText').textContent = live ? (st.armed ? '监控·实盘' : '监控·模拟') : '监控离线';
     // dashboard
     const ring = $('monRing'); ring.className = 'mon-ring' + (live ? ' live' : '');
     $('monSub').textContent = live
       ? `${st.presetName || '模板'} · preset ${st.preset}`
       : '监控进程未运行（命令行启动 four_watch.mjs）';
     $('monPills').innerHTML = live
-      ? `<span class="pill ${st.armed ? 'arm' : 'dry'}">${st.armed ? '武装买入' : '演练模式'}</span><span class="pill on">运行中</span>`
+      ? `<span class="pill ${st.armed ? 'arm' : 'dry'}">${st.armed ? '实盘' : '模拟'}</span><span class="pill on">运行中</span>`
       : `<span class="pill off">离线</span>`;
     const stats = [
       ['买入预算', (st.budgetBnb ?? '—') + ' BNB', 'gold'],

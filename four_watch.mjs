@@ -172,7 +172,7 @@ async function tryBuy(token) {
     const pv = await baw(['contract-call', 'preview', '--binanceChainId', '56',
       '--from', WALLET, '--to', CFG.core, '--value', BUDGET_WEI, '--inputData', data]);
     if (!pv.success) return {ok: false, reason: pv.error?.message || 'preview failed'};
-    if (!CFG.armed) { log('  BUYABLE (dry-run) req', pv.data.requestId, (Date.now() - t0) + 'ms'); return {ok: true, dryRun: true}; }
+    if (!CFG.armed) { log('  可买入（模拟，未下单） req', pv.data.requestId, (Date.now() - t0) + 'ms'); return {ok: true, dryRun: true}; }
     const ex = await baw(['contract-call', 'execute', '--requestId', pv.data.requestId]);
     log('  execute', (Date.now() - t0) + 'ms', JSON.stringify(ex).slice(0, 200));
     return {ok: !!ex.success, result: ex};
@@ -280,7 +280,7 @@ async function main() {
     catch (e) { log('startup head retry', i, e.message.slice(0, 50)); await new Promise(r => setTimeout(r, 2000)); }
   }
   lastScanned = head || 0;
-  log('four_watch start · wallet', WALLET, '· budget', CFG.budgetBnb, 'BNB · armed', CFG.armed,
+  log('four_watch start · wallet', WALLET, '· budget', CFG.budgetBnb, 'BNB · 模式', CFG.armed ? '实盘' : '模拟',
       '· preset', CFG.presetId.toString(), '· head', head, '· sources: wss+fallback');
   for (const u of CFG.wss) startWss(u.trim());
   // 10x price-watch for bought tokens (alert only).

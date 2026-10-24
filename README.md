@@ -25,7 +25,7 @@
 - **聚合兑换**：任意代币互换、USDT⇄BNB 快捷对、方向反转、滑点（自动/0.5/1/3/自定义）与 Gas（低/中/高）、防抖自动报价、价格影响、**25%/50%/75%/最大** 比例快捷填入、订单历史轮询到成交。
 - **代币信息展示**：代币选择器里粘贴合约地址即展示该币 **logo / 名称 / 价格 / 市值 / 流动性 / 持有人 / 买卖税 / 貔貅·rug 风险徽章**（数据来自 GMGN），而不是裸"导入"。
 - **Four.meme 抢购监控 + 自动买入**：事件驱动监听指定模板（preset）的新币上链，命中后自动用固定 BNB 预算走正确入口买入；**买不进（白名单/revert）自动跳过下一个，不烧 gas**；买到后桌面弹窗 + 面板事件；持仓涨到 10 倍弹窗提醒（只提醒不自动卖）。
-- **监控仪表盘**：实时显示在线/武装状态、盯的模板、预算、最新区块、已买/已跳计数、WSS 连接、心跳。
+- **监控仪表盘**：实时显示在线状态、实盘/模拟、盯的模板、预算、最新区块、已买/已跳计数、WSS 连接、心跳。
 
 ---
 
@@ -78,8 +78,6 @@ four_watch.mjs  (独立后台进程)
 | Gang Pair / Gang V2 | V2 pad `curves(ca)` | 暂不支持自动交易 | 以 ERC20（bStocks / GANG / WBNB）计价，需先换出报价代币并授权 |
 | MOAT 占席（fair slot） | moat.fun board `mode=fair` | 暂未接入 | `fillSlot` 按席位定额付款，窗口期不可卖 |
 
-「火箭交易」未找到对应的独立平台或合约，未接入。
-
 **曲线直调的安全模型**：`routes.mjs` 只负责拼 calldata。每笔交易都先 `baw contract-call preview`（钱包后端模拟），通过后才 `execute`。卖出前的授权是单独一笔 `approve`，额度精确等于本次卖出数量，不做无限授权。滑点保护：买卖都按报价算 `minOut`，`auto` 滑点在曲线路由上默认 10%。
 
 **直调交易的记录**：直调交易不经过 baw 的订单簿，面板在浏览器 localStorage 里另存一份，和 baw 订单合并显示在历史记录里，带平台标签和 Tx 链接。
@@ -99,23 +97,23 @@ four_watch.mjs  (独立后台进程)
 ## 快速开始
 
 ```bash
-git clone <this-repo> agent-desk && cd agent-desk
+git clone https://github.com/gunksd/agenticwallet-desk.git && cd agenticwallet-desk
 npm i                                   # ws + @noble/hashes
 
 # 1) 起面板
 NODE_USE_ENV_PROXY=1 python3 ptah_panel.py        # 打开 http://127.0.0.1:8787
 
-# 2) 起监控 —— 先演练（不真买），确认无误再武装
-#    演练：FOUR_ARM 不设
+# 2) 起监控 —— 先模拟（不真买），确认无误再切实盘
+#    模拟：FOUR_ARM 不设
 NODE_USE_ENV_PROXY=1 node four_watch.mjs
-#    武装真买：
+#    实盘：
 GMGN_API_KEY=$(grep GMGN_API_KEY ~/.config/gmgn/.env|cut -d= -f2) \
 NODE_USE_ENV_PROXY=1 FOUR_ARM=1 FOUR_BUDGET_BNB=0.01 node four_watch.mjs
 ```
 
 > `NODE_USE_ENV_PROXY=1`：本机 Node fetch 需走本地代理时加上；不需要可省。
 
-环境变量见 `.env.example`。常用：`FOUR_ARM`(1=真买)、`FOUR_BUDGET_BNB`、`FOUR_PRESET`、`FOUR_LOGS_RPC`（自带高吞吐 getLogs 端点）。
+环境变量见 `.env.example`。常用：`FOUR_ARM`(1=实盘)、`FOUR_BUDGET_BNB`、`FOUR_PRESET`、`FOUR_LOGS_RPC`（自带高吞吐 getLogs 端点）。
 
 ---
 
@@ -219,7 +217,7 @@ POST 都校验 Origin 和 Content-Type；token 参数用 `^0x[a-fA-F0-9]{40}$` �
 
 ## 免责声明
 
-本项目用于学习与自用自动化。链上交易有风险（抢购失败、貔貅、rug、滑点、gas 浪费）。自动买入默认关闭（`FOUR_ARM` 不设即演练），请在小额演练确认后再武装。你对自己的资金和操作负全部责任。不构成任何投资建议。
+本项目用于学习与自用自动化。链上交易有风险（抢购失败、貔貅、rug、滑点、gas 浪费）。自动买入默认是模拟（`FOUR_ARM` 不设），请先小额确认再切实盘。你对自己的资金和操作负全部责任。不构成任何投资建议。
 
 ## License
 

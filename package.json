@@ -1,5 +1,5 @@
 {
-  "name": "agent-desk",
+  "name": "agenticwallet-desk",
   "version": "1.0.0",
   "description": "本地 BSC 交易台 + Four.meme 新币抢购监控，签名全程经 Binance Agentic Wallet CLI，面板不持私钥。",
   "type": "module",
