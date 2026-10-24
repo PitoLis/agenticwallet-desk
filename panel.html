@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Agent Desk · BSC 交易台</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23e0b24a'/%3E%3Cstop offset='1' stop-color='%23b8842a'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='%23faf6ee'/%3E%3Cg fill='url(%23g)'%3E%3Crect x='6' y='6' width='5' height='5'/%3E%3Crect x='21' y='6' width='5' height='5'/%3E%3Crect x='13.5' y='6' width='5' height='5' fill='%23d9a73f'/%3E%3Crect x='6' y='13.5' width='5' height='5' fill='%23d9a73f'/%3E%3Crect x='21' y='13.5' width='5' height='5' fill='%23d9a73f'/%3E%3Crect x='13.5' y='13.5' width='5' height='5'/%3E%3Crect x='6' y='21' width='5' height='5'/%3E%3Crect x='21' y='21' width='5' height='5'/%3E%3Crect x='13.5' y='21' width='5' height='5' fill='%23d9a73f'/%3E%3C/g%3E%3C/svg%3E">
+<style>
+:root{
+  /* warm ivory substrate, champagne-gold accent, restrained up/down */
+  --bg:oklch(97.5% .008 85);
+  --bg-2:oklch(95.8% .011 85);
+  --surface:oklch(99.4% .004 85);
+  --surface-2:oklch(97.6% .007 85);
+  --ink:oklch(26% .02 70);
+  --muted:oklch(50% .018 70);
+  --faint:oklch(64% .014 70);
+  --line:oklch(89% .012 80);
+  --line-2:oklch(93% .009 80);
+  --gold:oklch(72% .11 78);
+  --gold-deep:oklch(62% .12 70);
+  --gold-soft:oklch(95% .045 82);
+  --gold-line:oklch(80% .09 80);
+  --ink-ctr:oklch(99% 0 0);
+  --up:oklch(58% .13 150);
+  --down:oklch(57% .19 25);
+  --warn:oklch(72% .14 70);
+  --r:18px;--r-s:12px;--r-xs:9px;
+  --shadow:0 1px 2px oklch(40% .03 70/.05),0 14px 40px -24px oklch(40% .04 70/.3);
+  --shadow-gold:0 10px 30px -14px oklch(72% .11 78/.5);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;min-height:100vh;color:var(--ink);
+  font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,"PingFang SC",sans-serif;
+  -webkit-font-smoothing:antialiased;
+  background:
+    radial-gradient(1100px 520px at 88% -8%,var(--gold-soft),transparent 60%),
+    radial-gradient(900px 480px at -6% 108%,oklch(95% .02 80/.7),transparent 55%),
+    var(--bg);}
+/* subtle grain to kill vector-flat look */
+body::before{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.03;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");}
+.mono{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-variant-numeric:tabular-nums}
+.tnum{font-variant-numeric:tabular-nums}
+
+header{position:sticky;top:0;z-index:20;height:62px;display:flex;align-items:center;gap:18px;
+  padding:0 clamp(16px,4vw,40px);
+  background:oklch(99% .004 85/.78);backdrop-filter:blur(14px) saturate(1.1);
+  border-bottom:1px solid var(--line-2)}
+.brand{display:flex;align-items:center;gap:11px;font-weight:700;font-size:16px;letter-spacing:-.025em;white-space:nowrap}
+.brand canvas{width:32px;height:32px;border-radius:9px;display:block;
+  box-shadow:0 0 0 1px var(--gold-line),0 4px 12px -6px oklch(72% .11 78/.6)}
+.brand .sub{font-size:10px;font-weight:600;letter-spacing:.14em;color:var(--gold-deep);text-transform:uppercase}
+.nav{display:flex;gap:3px;margin-left:6px}
+.nav-item{position:relative;border:0;background:none;padding:9px 15px;border-radius:10px;
+  color:var(--muted);font:inherit;font-weight:600;cursor:pointer;transition:.15s}
+.nav-item:hover{color:var(--ink);background:var(--surface-2)}
+.nav-item.active{color:var(--gold-deep)}
+.nav-item.active::after{content:"";position:absolute;left:14px;right:14px;bottom:-1px;height:2px;
+  background:linear-gradient(90deg,var(--gold),var(--gold-deep));border-radius:2px}
+.spacer{flex:1}
+.hgroup{display:flex;align-items:center;gap:9px}
+.chip{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:600;padding:7px 12px;border-radius:999px;
+  background:var(--surface);border:1px solid var(--line);color:var(--muted)}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--faint);transition:.2s}
+.chip.live .dot{background:var(--up);box-shadow:0 0 0 3px oklch(58% .13 150/.16)}
+.chip.armed{border-color:var(--gold-line);color:var(--gold-deep);background:var(--gold-soft)}
+.chip.armed .dot{background:var(--gold);box-shadow:0 0 0 3px oklch(72% .11 78/.2)}
+.chip.off .dot{background:var(--down)}
+
+main{position:relative;z-index:1;max-width:1180px;margin:0 auto;padding:clamp(20px,3.5vw,38px) clamp(16px,4vw,40px) 70px}
+.view[hidden]{display:none}
+.grid-2{display:grid;grid-template-columns:minmax(0,460px) minmax(0,1fr);gap:26px;align-items:start}
+.col{display:flex;flex-direction:column;gap:22px}
+
+.card{position:relative;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow)}
+.card.gold{border-color:var(--gold-line)}
+.card.gold::before{content:"";position:absolute;inset:0;border-radius:var(--r);padding:1px;pointer-events:none;
+  background:linear-gradient(135deg,var(--gold-line),transparent 40%);-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;opacity:.6}
+.pad{padding:24px}
+.hd{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:18px}
+.hd h2{margin:0;font-size:12px;font-weight:650;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.hd .ghost{font-size:12px}
+.ghost{border:1px solid var(--line);background:var(--surface-2);color:var(--muted);border-radius:9px;padding:7px 11px;font:inherit;font-weight:600;cursor:pointer;transition:.15s}
+.ghost:hover{border-color:var(--gold-line);color:var(--gold-deep);background:var(--gold-soft)}
+
+/* swap */
+.swap-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.swap-top .t{font-size:20px;font-weight:750;letter-spacing:-.025em}
+.leg{background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-s);padding:15px 16px;transition:.15s}
+.leg:focus-within{border-color:var(--gold-line);box-shadow:0 0 0 3px var(--gold-soft)}
+.leg .lbl{display:flex;justify-content:space-between;font-size:12px;color:var(--faint);margin-bottom:10px}
+.leg .bal{cursor:pointer;color:var(--muted)}
+.leg .bal:hover{color:var(--gold-deep)}
+.leg-main{display:flex;align-items:center;gap:12px}
+.amt{flex:1;min-width:0;border:0;background:none;font-size:27px;font-weight:650;letter-spacing:-.02em;color:var(--ink);padding:0;font-variant-numeric:tabular-nums}
+.amt:focus{outline:none}.amt::placeholder{color:oklch(82% .01 80)}
+.amt[readonly]{color:var(--muted)}
+.tok-btn{display:flex;align-items:center;gap:8px;border:1px solid var(--line);background:var(--surface);
+  border-radius:999px;padding:7px 13px 7px 8px;cursor:pointer;font-weight:650;white-space:nowrap;transition:.15s;box-shadow:0 1px 2px oklch(40% .03 70/.05)}
+.tok-btn:hover{border-color:var(--gold-line);background:var(--gold-soft)}
+.tok-ico{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:700;overflow:hidden;
+  background:linear-gradient(135deg,oklch(78% .09 80),oklch(70% .11 70));color:#fff;flex:none}
+.tok-ico img{width:100%;height:100%;object-fit:cover}
+.tok-ico.bnb{background:linear-gradient(135deg,#f3ba2f,#d99a1c);color:#3a2d05}
+.tok-ico.usdt{background:linear-gradient(135deg,#26a17b,#1a7d5e)}
+.tok-btn .car{color:var(--faint);font-size:10px}
+.flip-wrap{display:flex;justify-content:center;height:0;position:relative;z-index:2}
+.flip{width:40px;height:40px;margin:-12px 0;border-radius:12px;border:3px solid var(--surface);
+  background:linear-gradient(135deg,var(--gold-soft),var(--surface-2));cursor:pointer;display:grid;place-items:center;
+  color:var(--gold-deep);box-shadow:var(--shadow);transition:transform .25s,box-shadow .2s;font-size:15px}
+.flip:hover{transform:rotate(180deg);box-shadow:var(--shadow-gold)}
+.pcts{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-top:12px}
+.pcts button{border:1px solid var(--line);background:var(--surface);color:var(--muted);border-radius:8px;padding:7px 0;font:inherit;font-size:12px;font-weight:650;cursor:pointer;transition:.15s}
+.pcts button:hover{border-color:var(--gold-line);color:var(--gold-deep);background:var(--gold-soft)}
+.pcts button:active{transform:scale(.97)}
+.pairs{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0 2px}
+.pair{font-size:12px;padding:7px 12px;border-radius:999px;border:1px solid var(--line);background:var(--surface-2);color:var(--muted);cursor:pointer;font-weight:600;transition:.15s}
+.pair:hover{border-color:var(--gold-line);color:var(--gold-deep);background:var(--gold-soft)}
+.qbox{margin-top:16px;border-top:1px dashed var(--line);padding-top:14px;font-size:13px;display:none}
+.qbox.show{display:block}
+.qrow{display:flex;justify-content:space-between;padding:4px 0;color:var(--muted)}
+.qrow b{color:var(--ink);font-weight:650}
+.impact.lo{color:var(--up)}.impact.mid{color:var(--warn)}.impact.hi{color:var(--down)}
+.cta{width:100%;margin-top:18px;border:0;border-radius:var(--r-s);padding:17px;font-size:15px;font-weight:750;cursor:pointer;
+  color:var(--ink-ctr);background:linear-gradient(135deg,var(--gold),var(--gold-deep));box-shadow:var(--shadow-gold);transition:.15s;letter-spacing:.01em}
+.cta:hover{filter:brightness(1.06)}
+.cta:disabled{opacity:.4;cursor:not-allowed;filter:none;box-shadow:none;background:var(--line)}
+.status{margin-top:12px;font-size:12px;color:var(--muted);min-height:16px;display:flex;align-items:center;gap:8px}
+.spin{width:12px;height:12px;border:2px solid var(--line);border-top-color:var(--gold);border-radius:50%;animation:sp .7s linear infinite;display:none}
+.status.busy .spin{display:inline-block}
+@keyframes sp{to{transform:rotate(360deg)}}
+
+/* settings */
+.settings{display:none;margin:12px 0 2px;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-s);padding:15px}
+.settings.show{display:block}
+.settings .cap{font-size:11px;color:var(--faint);margin:7px 0 0}
+.seg{display:flex;gap:6px;margin-top:8px}
+.seg button{flex:1;border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:9px;font-size:12px;cursor:pointer;font-weight:600;transition:.15s}
+.seg button.on{border-color:var(--gold-line);background:var(--gold-soft);color:var(--gold-deep)}
+.settings input{width:100%;margin-top:8px;border:1px solid var(--line);border-radius:8px;padding:10px 12px;font:inherit}
+.settings input:focus{outline:none;border-color:var(--gold-line)}
+
+/* token info card */
+.tokcard{display:none;margin-top:18px;border-top:1px solid var(--line-2);padding-top:16px}
+.tokcard.show{display:block}
+.tokcard-head{display:flex;align-items:center;gap:12px}
+.tokcard-head .ic{width:42px;height:42px;border-radius:50%;overflow:hidden;background:var(--surface-2);flex:none;display:grid;place-items:center;font-weight:700;color:var(--muted)}
+.tokcard-head .ic img{width:100%;height:100%;object-fit:cover}
+.tokcard-name{font-weight:750;font-size:15px}
+.tokcard-sym{color:var(--muted);font-weight:500}
+.tokcard-addr{font-size:11px;color:var(--faint);margin-top:2px}
+.tokcard-lp{margin-left:auto;font-size:11px;padding:4px 10px;border-radius:999px;background:var(--gold-soft);color:var(--gold-deep);font-weight:700;white-space:nowrap;border:1px solid var(--gold-line)}
+.kgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px}
+.kgrid .c{background:var(--surface-2);border:1px solid var(--line-2);border-radius:10px;padding:10px 11px}
+.kgrid .c .k{font-size:11px;color:var(--faint)}
+.kgrid .c .v{font-weight:700;margin-top:3px;font-variant-numeric:tabular-nums}
+.badges{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}
+.badge{font-size:11px;padding:4px 10px;border-radius:999px;font-weight:650}
+.badge.ok{background:oklch(94% .05 150);color:var(--up)}
+.badge.warn{background:oklch(95% .05 75);color:var(--warn)}
+.badge.bad{background:oklch(94% .06 25);color:var(--down)}
+
+/* lists */
+.list{display:flex;flex-direction:column}
+.li{display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--line-2);gap:10px}
+.li:last-child{border:0}
+.li .l{display:flex;align-items:center;gap:11px;min-width:0}
+.li .v{font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+.addr{font-size:11px;color:var(--faint)}
+.pair-l{font-weight:650}.meta{font-size:11px;color:var(--faint);margin-top:2px}
+.st{font-size:11px;padding:3px 9px;border-radius:999px;font-weight:700;white-space:nowrap}
+.st-FINISHED,.st-BOUGHT{background:oklch(94% .05 150);color:var(--up)}
+.st-PENDING,.st-10x{background:var(--gold-soft);color:var(--gold-deep)}
+.st-FAILED{background:oklch(94% .06 25);color:var(--down)}
+.li a{color:var(--gold-deep);text-decoration:none;font-size:11px}.li a:hover{text-decoration:underline}
+.empty{color:var(--faint);font-size:13px;padding:18px 0;text-align:center}
+
+/* monitor dashboard */
+.mon-hero{display:flex;align-items:center;gap:16px;margin-bottom:6px}
+.mon-ring{width:54px;height:54px;border-radius:50%;flex:none;display:grid;place-items:center;font-size:22px;
+  background:var(--surface-2);border:1px solid var(--line)}
+.mon-ring.live{background:var(--gold-soft);border-color:var(--gold-line);box-shadow:var(--shadow-gold)}
+.mon-title{font-size:19px;font-weight:750;letter-spacing:-.02em}
+.mon-sub{font-size:12px;color:var(--muted);margin-top:3px}
+.pill{font-size:11px;font-weight:700;padding:4px 10px;border-radius:999px}
+.pill.on{background:oklch(94% .05 150);color:var(--up)}
+.pill.off{background:oklch(94% .06 25);color:var(--down)}
+.pill.arm{background:var(--gold-soft);color:var(--gold-deep);border:1px solid var(--gold-line)}
+.pill.dry{background:oklch(95% .05 75);color:var(--warn)}
+.statgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:11px;margin-top:16px}
+.statgrid .c{background:var(--surface-2);border:1px solid var(--line-2);border-radius:var(--r-xs);padding:13px 14px}
+.statgrid .c .k{font-size:11px;color:var(--faint)}
+.statgrid .c .v{font-weight:750;margin-top:4px;font-size:16px;font-variant-numeric:tabular-nums}
+.statgrid .c .v.gold{color:var(--gold-deep)}
+
+.four{border:1px solid var(--line);border-radius:var(--r-s);background:var(--surface-2);padding:15px}
+.four .t{font-size:13px;font-weight:700;display:flex;align-items:center;gap:8px}
+.tag{font-size:10px;padding:2px 8px;border-radius:999px;background:oklch(95% .05 75);color:var(--warn);font-weight:700}
+.four p{font-size:12px;color:var(--muted);margin:9px 0 0;line-height:1.6}
+.four input{width:100%;margin-top:11px;border:1px solid var(--line);border-radius:8px;padding:11px;font:12px ui-monospace,monospace}
+.four input:focus{outline:none;border-color:var(--gold-line)}
+.four pre{font-size:11px;white-space:pre-wrap;word-break:break-all;margin:11px 0 0;color:var(--muted);max-height:180px;overflow:auto;display:none}
+
+/* token picker dialog — search shows live content */
+dialog{border:1px solid var(--line);border-radius:var(--r);padding:0;width:min(440px,93vw);color:var(--ink);box-shadow:0 30px 70px -24px oklch(40% .05 70/.45)}
+dialog::backdrop{background:oklch(40% .03 70/.3);backdrop-filter:blur(3px)}
+.dlg-hd{padding:20px 22px 14px;border-bottom:1px solid var(--line-2)}
+.dlg-hd h3{margin:0 0 13px;font-size:16px;font-weight:700}
+.dlg-hd input{width:100%;border:1px solid var(--line);border-radius:11px;padding:13px;font:13px ui-monospace,monospace}
+.dlg-hd input:focus{outline:none;border-color:var(--gold-line);box-shadow:0 0 0 3px var(--gold-soft)}
+.dlg-body{max-height:360px;overflow:auto;padding:10px}
+.opt{display:flex;align-items:center;gap:12px;padding:12px;border-radius:11px;cursor:pointer;transition:.12s}
+.opt:hover{background:var(--surface-2)}
+.opt .name{font-weight:650}.opt .sub{font-size:11px;color:var(--faint)}
+.opt .r{margin-left:auto;text-align:right;font-variant-numeric:tabular-nums}
+/* searched-token preview inside picker */
+.srch-card{margin:4px 6px 10px;border:1px solid var(--gold-line);border-radius:var(--r-s);background:var(--gold-soft);padding:15px}
+.srch-head{display:flex;align-items:center;gap:12px}
+.srch-head .ic{width:40px;height:40px;border-radius:50%;overflow:hidden;background:var(--surface);flex:none;display:grid;place-items:center;font-weight:700}
+.srch-head .ic img{width:100%;height:100%;object-fit:cover}
+.srch-name{font-weight:750;font-size:15px}
+.srch-sub{font-size:11px;color:var(--muted);margin-top:2px}
+.srch-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:13px}
+.srch-grid .c{background:var(--surface);border:1px solid var(--line-2);border-radius:9px;padding:8px 9px}
+.srch-grid .c .k{font-size:10px;color:var(--faint)}
+.srch-grid .c .v{font-weight:700;font-size:13px;margin-top:2px;font-variant-numeric:tabular-nums}
+.srch-badges{display:flex;flex-wrap:wrap;gap:6px;margin-top:11px}
+.srch-pick{width:100%;margin-top:13px;border:0;border-radius:10px;padding:13px;font-weight:750;cursor:pointer;color:var(--ink-ctr);background:linear-gradient(135deg,var(--gold),var(--gold-deep));box-shadow:var(--shadow-gold)}
+.srch-pick:hover{filter:brightness(1.06)}
+.srch-loading{padding:22px;text-align:center;color:var(--muted);font-size:13px}
+
+.foot{text-align:center;font-size:12px;color:var(--faint);margin-top:30px;line-height:1.7}
+@media(max-width:880px){.grid-2{grid-template-columns:1fr}.col{order:2}.nav{display:none}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><canvas id="brandIcon" width="32" height="32" aria-hidden="true"></canvas>
+    <div>Agent Desk<div class="sub">BSC 交易台</div></div></div>
+  <nav class="nav" id="nav">
+    <button class="nav-item active" data-view="swap" onclick="showView('swap')">兑换</button>
+    <button class="nav-item" data-view="monitor" onclick="showView('monitor')">抢购监控</button>
+    <button class="nav-item" data-view="activity" onclick="showView('activity')">记录</button>
+  </nav>
+  <div class="spacer"></div>
+  <div class="hgroup">
+    <span class="chip" id="monChip"><span class="dot"></span><span id="monChipText">监控</span></span>
+    <span class="chip">BNB · 56</span>
+  </div>
+</header>
+
+<main>
+  <!-- ===== SWAP VIEW ===== -->
+  <section class="view" id="view-swap">
+    <div class="grid-2">
+      <section class="card gold pad">
+        <div class="swap-top">
+          <span class="t">兑换</span>
+          <button class="ghost" id="gear" onclick="toggleSettings()">滑点 <b id="slipLabel">自动</b> ▾</button>
+        </div>
+        <div class="settings" id="settings">
+          <div style="font-size:12px;font-weight:650">滑点容忍度</div>
+          <div class="seg" id="slipSeg">
+            <button data-v="auto" class="on" onclick="setSlip('auto')">自动</button>
+            <button data-v="0.5" onclick="setSlip('0.5')">0.5%</button>
+            <button data-v="1" onclick="setSlip('1')">1%</button>
+            <button data-v="3" onclick="setSlip('3')">3%</button>
+          </div>
+          <input id="slipCustom" placeholder="自定义 %（0–100）" inputmode="decimal">
+          <div style="font-size:12px;font-weight:650;margin-top:12px">Gas 等级</div>
+          <div class="seg" id="gasSeg">
+            <button data-v="LOW" onclick="setGas('LOW')">低</button>
+            <button data-v="MEDIUM" onclick="setGas('MEDIUM')">中</button>
+            <button data-v="HIGH" class="on" onclick="setGas('HIGH')">高</button>
+          </div>
+          <p class="cap">MEV 保护始终开启。Gas 越高打包越快。</p>
+        </div>
+
+        <div class="leg">
+          <div class="lbl"><span>支付</span><span class="bal" id="fromBal" onclick="usePct(1)">余额：—</span></div>
+          <div class="leg-main">
+            <input class="amt" id="fromAmt" placeholder="0.0" inputmode="decimal" autocomplete="off">
+            <button class="tok-btn" id="fromTok" onclick="openPicker('from')"></button>
+          </div>
+          <div class="pcts" id="pcts">
+            <button type="button" onclick="usePct(0.25)">25%</button>
+            <button type="button" onclick="usePct(0.5)">50%</button>
+            <button type="button" onclick="usePct(0.75)">75%</button>
+            <button type="button" onclick="usePct(1)">最大</button>
+          </div>
+        </div>
+        <div class="flip-wrap"><button class="flip" onclick="flip()" title="反转方向">⇅</button></div>
+        <div class="leg">
+          <div class="lbl"><span>收到（预计）</span><span class="bal" id="toBal">余额：—</span></div>
+          <div class="leg-main">
+            <input class="amt" id="toAmt" placeholder="0.0" readonly>
+            <button class="tok-btn" id="toTok" onclick="openPicker('to')"></button>
+          </div>
+        </div>
+
+        <div class="pairs" id="pairs"></div>
+        <div class="qbox" id="quoteBox">
+          <div class="qrow"><span>汇率</span><b id="qRate">—</b></div>
+          <div class="qrow"><span>最小到账（滑点后）</span><b id="qMin">—</b></div>
+          <div class="qrow"><span>价格影响</span><b id="qImpact" class="impact">—</b></div>
+        </div>
+        <button class="cta" id="cta" onclick="doSwap()" disabled>输入数量</button>
+        <div class="status" id="status"><span class="spin"></span><span id="statusText">准备就绪</span></div>
+
+        <div class="tokcard" id="tokCard">
+          <div class="tokcard-head">
+            <span class="ic" id="tiIc"></span>
+            <div>
+              <div class="tokcard-name"><span id="tiName">—</span> <span class="tokcard-sym" id="tiSym"></span></div>
+              <div class="tokcard-addr mono" id="tiAddr"></div>
+            </div>
+            <span class="tokcard-lp" id="tiLp"></span>
+          </div>
+          <div class="kgrid" id="tiGrid"></div>
+          <div class="badges" id="tiBadges"></div>
+        </div>
+      </section>
+
+      <div class="col">
+        <section class="card pad">
+          <div class="hd"><h2>钱包余额</h2><button class="ghost" onclick="loadWallet()">刷新</button></div>
+          <p class="addr mono" id="walletAddr" style="margin:0 0 14px">读取中…</p>
+          <div class="list" id="balList"></div>
+        </section>
+        <section class="card pad">
+          <div class="hd"><h2>最近兑换</h2><button class="ghost" onclick="loadHistory()">刷新</button></div>
+          <div class="list" id="hist"><div class="empty">加载中…</div></div>
+        </section>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== MONITOR VIEW ===== -->
+  <section class="view" id="view-monitor" hidden>
+    <div class="grid-2">
+      <section class="card gold pad">
+        <div class="mon-hero">
+          <div class="mon-ring" id="monRing">🎯</div>
+          <div>
+            <div class="mon-title">抢购监控</div>
+            <div class="mon-sub" id="monSub">读取状态…</div>
+          </div>
+          <div style="margin-left:auto;display:flex;gap:7px" id="monPills"></div>
+        </div>
+        <div class="statgrid" id="monStats"></div>
+      </section>
+      <div class="col">
+        <section class="card pad">
+          <div class="hd"><h2>买入 / 提醒事件</h2><button class="ghost" onclick="loadAlerts()">刷新</button></div>
+          <div class="list" id="alerts"><div class="empty">尚无事件</div></div>
+        </section>
+        <section class="card pad">
+          <div class="hd"><h2>Four.meme 内盘核查</h2></div>
+          <div class="four">
+            <div class="t">Agent ID 专属模板 <span class="tag">需白名单</span></div>
+            <p id="fourDesc">该模板由官方维护准入白名单，未入名单的地址买入会被合约拒绝（0xa2dda494）。仅只读核查，不发起交易。</p>
+            <input class="mono" id="fourToken" placeholder="0x… 模板代币合约">
+            <button class="ghost" style="margin-top:11px;width:100%;padding:12px" onclick="preflight()">检查模板与白名单</button>
+            <pre id="fourOut"></pre>
+          </div>
+        </section>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== ACTIVITY VIEW ===== -->
+  <section class="view" id="view-activity" hidden>
+    <div class="grid-2">
+      <section class="card pad">
+        <div class="hd"><h2>兑换记录</h2><button class="ghost" onclick="loadHistory()">刷新</button></div>
+        <div class="list" id="hist2"><div class="empty">加载中…</div></div>
+      </section>
+      <section class="card pad">
+        <div class="hd"><h2>监控事件</h2><button class="ghost" onclick="loadAlerts()">刷新</button></div>
+        <div class="list" id="alerts2"><div class="empty">尚无事件</div></div>
+      </section>
+    </div>
+  </section>
+
+  <p class="foot">本地运行 · 金额与合约地址由你输入 · 全部签名与风控经本机 baw 完成，面板不持有密钥</p>
+</main>
+
+<dialog id="picker">
+  <div class="dlg-hd">
+    <h3 id="pickerTitle">选择代币</h3>
+    <input id="pickerInput" placeholder="粘贴合约地址 0x… 或搜索名称/符号" autocomplete="off" spellcheck="false">
+  </div>
+  <div class="dlg-body" id="pickerList"></div>
+</dialog>
+
+<script src="/panel.js"></script>
+<script>bootstrap();</script>
+</body>
+</html>

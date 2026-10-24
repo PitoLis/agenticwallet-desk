@@ -1,0 +1,9 @@
+node_modules/
+*.log
+.DS_Store
+# 本机运行态/密钥，永不提交
+.env
+.config/
+*-state.json
+*-events.json
+*-status.json

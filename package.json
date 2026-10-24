@@ -1,0 +1,15 @@
+{
+  "name": "agent-desk",
+  "version": "1.0.0",
+  "description": "本地 BSC 交易台 + Four.meme 新币抢购监控，签名全程经 Binance Agentic Wallet CLI，面板不持私钥。",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "panel": "python3 ptah_panel.py",
+    "watch": "node four_watch.mjs"
+  },
+  "dependencies": {
+    "ws": "^8.22.0",
+    "@noble/hashes": "^1.5.0"
+  }
+}
