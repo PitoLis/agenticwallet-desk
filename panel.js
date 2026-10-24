@@ -311,13 +311,15 @@ function activeCustomToken() {
   return null;
 }
 function tokenInfoCells(d, token) {
+  const usd = v => v == null ? '—' : '$' + (v >= 1 ? Math.round(v).toLocaleString('en-US') : trim(v));
+  const pct = v => v == null ? '—' : (v * 100).toFixed(v * 100 % 1 ? 1 : 0) + '%';
   return [
-    ['价格', d.price != null ? '$' + trim(d.price) : '—'],
-    ['市值', d.market_cap != null ? '$' + trim(d.market_cap) : '—'],
-    ['流动性', d.liquidity != null ? '$' + trim(d.liquidity) : '—'],
+    ['价格', d.price ? '$' + trim(d.price) : '—'],
+    ['市值', d.market_cap ? usd(d.market_cap) : '—'],
+    d.curve ? ['内盘进度', d.progress != null ? pct(d.progress) : '内盘中'] : ['流动性', d.liquidity ? usd(d.liquidity) : '—'],
     ['持有人', d.holder_count ?? '—'],
-    ['买入税', d.buy_tax != null ? (d.buy_tax * 100).toFixed(1) + '%' : '—'],
-    ['卖出税', d.sell_tax != null ? (d.sell_tax * 100).toFixed(1) + '%' : '—'],
+    ['买入税', pct(d.buy_tax)],
+    ['卖出税', pct(d.sell_tax)],
   ];
 }
 function riskBadges(d) {
@@ -392,8 +394,9 @@ async function renderSearchCard(token) {
   const bal = meta?.balance ?? state.balances[token] ?? '—';
   const logo = info?.logo || '';
   const d = info || {};
-  const cells = [['价格', d.price != null ? '$' + trim(d.price) : '—'], ['流动性', d.liquidity != null ? '$' + trim(d.liquidity) : '—'], ['余额', bal]];
-  const extraCells = [['市值', d.market_cap != null ? '$' + trim(d.market_cap) : '—'], ['买入税', d.buy_tax != null ? (d.buy_tax * 100).toFixed(1) + '%' : '—'], ['卖出税', d.sell_tax != null ? (d.sell_tax * 100).toFixed(1) + '%' : '—']];
+  const base6 = tokenInfoCells(d, token);
+  const cells = [base6[0], base6[2], ['余额', bal]];
+  const extraCells = [base6[1], base6[4], base6[5]];
   const card = document.createElement('div');
   card.className = 'srch-card';
   card.innerHTML =

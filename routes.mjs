@@ -179,6 +179,54 @@ export async function quote(ca, side, amount) {
   return {route: r, venue: 'direct', side, symbol, in: inAmt.toString(), out: out.toString(), outHuman: fromWei(out), note};
 }
 
+// ---- on-chain curve info (for tokens GMGN hasn't indexed yet) ----
+// Spot price = BNB in / tokens out for a tiny buy, which already includes the
+// platform's buy fee. Market cap = price x totalSupply (all these launchpads
+// mint the full supply up front).
+const FEE_BPS = {cycpad: ['TRADE_FEE_BPS()', 'TRADE_FEE_BPS()']};
+export async function curveInfo(ca) {
+  const r = await detect(ca);
+  if (r.venue !== 'direct') return {route: r};
+  const probe = '0.0001';
+  let priceBnb = null;
+  try {
+    const q = await quote(ca, 'buy', probe);
+    const out = BigInt(q.out);
+    if (out > 0n) priceBnb = Number(probe) / (Number(out) / 1e18);
+  } catch {}
+  const supplyHex = await tryCall(r.platform === 'units' ? r.token : ca, sel('totalSupply()'));
+  // Flap Agent tokens aren't deployed until graduation; their supply is a fixed 1B.
+  const supply = supplyHex && supplyHex !== '0x' ? Number(BigInt(supplyHex)) / 1e18 : (r.platform === 'flapagent' ? 1e9 : null);
+  let buyTax = null, sellTax = null;
+  if (FEE_BPS[r.platform]) {
+    const b = await tryCall(ca, sel(FEE_BPS[r.platform][0]));
+    if (b) buyTax = sellTax = Number(BigInt(b)) / 10000;
+  } else {
+    // Buy-quote structs expose the fee split; fee / (net + fee) is the buy fee rate.
+    const me = await wallet(), amt = 10n ** 15n;
+    let w = null, net = null, fee = null;
+    if (r.platform === 'gang' || r.platform === 'moat') { w = words(await tryCall(r.pad, enc('quoteBuy(address,address,uint256)', ca, me, amt))); net = w[1]; fee = w[2]; }
+    else if (r.platform === 'agentpad') { w = words(await tryCall(ca, enc('quoteBuy(uint256)', amt))); net = w[1]; fee = w[2]; }
+    else if (r.platform === 'units') { w = words(await tryCall(r.curve, enc('quoteBuy(address,uint256)', me, amt))); net = w[1]; fee = w[2]; }
+    else if (r.platform === 'flapagent') { w = words(await tryCall(r.portal, enc('quoteBuy(address,address,uint256)', r.market, me, amt))); net = w[0]; fee = w[1]; }
+    if (net && fee) {
+      const n = Number(BigInt('0x' + net)), f = Number(BigInt('0x' + fee));
+      if (n + f > 0) buyTax = f / (r.platform === 'flapagent' ? n : n + f);
+      // Fork-measured round trips (Gang/MOAT/AgentPad) show the sell fee equals the buy fee.
+      sellTax = buyTax;
+    }
+  }
+  // bonding-curve progress, where the platform exposes it
+  let progress = null;
+  if (r.platform === 'cycpad') {
+    const st = words(await tryCall(ca, sel('getState()')) || '0x');
+    const thr = await tryCall(ca, sel('GRADUATION_THRESHOLD()'));
+    const qr = await tryCall(ca, sel('quoteReserve()'));
+    if (thr && qr && BigInt(thr) > 0n) progress = Number(BigInt(qr)) / Number(BigInt(thr));
+  }
+  return {route: r, priceBnb, supply, mcapBnb: priceBnb && supply ? priceBnb * supply : null, buyTax, sellTax, progress};
+}
+
 // ---- trade (preview → execute via baw) ----
 async function bawCall(to, data, valueWei) {
   const me = await wallet();
@@ -232,6 +280,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     if (!/^0x[0-9a-fA-F]{40}$/.test(ca || '')) throw new Error('Invalid token address');
     if (cmd === 'detect') return out({success: true, data: await detect(ca)});
     if (cmd === 'quote') return out({success: true, data: await quote(ca, side, amount)});
+    if (cmd === 'curveinfo') return out({success: true, data: await curveInfo(ca)});
     if (cmd === 'trade') { const r = await trade(ca, side, amount, slip); return out({success: !!r.ok, data: r, error: r.ok ? undefined : {message: r.error || ('失败于 ' + r.stage)}}); }
     throw new Error('usage: detect|quote|trade <ca> ...');
   })().catch(e => out({success: false, error: {message: e.message}}));

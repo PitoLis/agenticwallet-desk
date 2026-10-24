@@ -54,46 +54,118 @@ def _gmgn_key():
     return os.environ.get('GMGN_API_KEY', '')
 
 
+def _gmgn(args, key):
+    """Run one gmgn-cli call and return its parsed `data` dict, or None."""
+    env = dict(os.environ, NODE_USE_ENV_PROXY='1', GMGN_API_KEY=key)
+    try:
+        p = subprocess.run(['gmgn-cli', *args, '--raw'], text=True, capture_output=True, timeout=25, env=env)
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    txt = p.stdout.strip()
+    try:
+        d = json.loads(txt[min(x for x in (txt.find('{'), txt.find('[')) if x >= 0):])
+    except Exception:
+        return None
+    d = d.get('data', d) if isinstance(d, dict) else d
+    return d if isinstance(d, dict) else None
+
+
+def _num(v):
+    try:
+        f = float(v)
+        return f if f == f else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _tri(v):
+    """GMGN flags: True/False, or None/-1 meaning 'not checked yet'."""
+    if v is True or v == 1:
+        return 'yes'
+    if v is False or v == 0:
+        return 'no'
+    return None
+
+
 def gmgn_token_info(token):
-    """Fetch logo + safety + price for a token via gmgn-cli. Best-effort; returns a
-    normalized subset so the UI can render an icon and risk badges."""
+    """Logo, price, market cap, liquidity, taxes and risk flags for a token.
+
+    `token info` carries identity/price/supply; taxes and honeypot/renounce flags
+    only exist in `token security`, so both are fetched in parallel. GMGN has no
+    market-cap field: it's price x circulating supply."""
     key = _gmgn_key()
     if not key:
         return {'success': False, 'error': {'message': 'GMGN API key 未配置'}}
-    try:
-        env = dict(os.environ, NODE_USE_ENV_PROXY='1', GMGN_API_KEY=key)
-        p = subprocess.run(['gmgn-cli', 'token', 'info', '--chain', 'bsc', '--address', token, '--raw'],
-                           text=True, capture_output=True, timeout=25, env=env)
-    except subprocess.TimeoutExpired:
-        return {'success': False, 'error': {'message': 'GMGN 请求超时'}}
-    except OSError as e:
-        return {'success': False, 'error': {'message': str(e)}}
-    txt = p.stdout.strip()
-    try:
-        i = min(x for x in (txt.find('{'), txt.find('[')) if x >= 0)
-        d = json.loads(txt[i:])
-    except Exception:
-        return {'success': False, 'error': {'message': (p.stderr or txt or 'GMGN 无响应')[:200]}}
-    data = d.get('data', d) if isinstance(d, dict) else d
-    price = data.get('price') if isinstance(data.get('price'), dict) else {}
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(2) as ex:
+        fi = ex.submit(_gmgn, ['token', 'info', '--chain', 'bsc', '--address', token], key)
+        fs = ex.submit(_gmgn, ['token', 'security', '--chain', 'bsc', '--address', token], key)
+        info, sec = fi.result() or {}, fs.result() or {}
+    if not info and not sec:
+        return {'success': False, 'error': {'message': 'GMGN 未收录或请求失败'}}
+    pr = info.get('price')
+    price = _num(pr.get('price') if isinstance(pr, dict) else pr)
+    supply = _num(info.get('circulating_supply')) or _num(info.get('total_supply'))
+    mcap = _num(info.get('market_cap')) or _num(info.get('usd_market_cap'))
+    if mcap is None and price is not None and supply:
+        mcap = price * supply
+    stat = info.get('stat') if isinstance(info.get('stat'), dict) else {}
     out = {
         'address': token,
-        'name': data.get('name'),
-        'symbol': data.get('symbol'),
-        'logo': data.get('logo'),
-        'launchpad': data.get('launchpad') or data.get('launchpad_platform'),
-        'price': price.get('price') or data.get('price') if not isinstance(data.get('price'), dict) else price.get('price'),
-        'market_cap': data.get('market_cap'),
-        'liquidity': data.get('liquidity'),
-        'holder_count': data.get('holder_count'),
-        'buy_tax': data.get('buy_tax'),
-        'sell_tax': data.get('sell_tax'),
-        'is_honeypot': data.get('is_honeypot'),
-        'renounced': data.get('owner_renounced'),
-        'rug_ratio': data.get('rug_ratio'),
-        'social': {'twitter': data.get('twitter'), 'telegram': data.get('telegram'), 'website': data.get('website')},
+        'name': info.get('name'),
+        'symbol': info.get('symbol'),
+        'logo': info.get('logo'),
+        'launchpad': info.get('launchpad') or info.get('launchpad_platform'),
+        'price': price,
+        'market_cap': mcap,
+        'liquidity': _num(info.get('liquidity')),
+        'holder_count': info.get('holder_count') or stat.get('holder_count'),
+        'buy_tax': _num(sec.get('buy_tax')),
+        'sell_tax': _num(sec.get('sell_tax')),
+        'is_honeypot': _tri(sec.get('is_honeypot')),
+        'renounced': _tri(sec.get('is_renounced')),
+        'open_source': _tri(sec.get('is_open_source')),
+        'top10_rate': _num(sec.get('top_10_holder_rate')) or _num(stat.get('top_10_holder_rate')),
+        'rug_ratio': _num(info.get('rug_ratio')),
+        'social': {'twitter': info.get('twitter'), 'telegram': info.get('telegram'), 'website': info.get('website')},
     }
     return {'success': True, 'data': out}
+
+
+def token_info(token):
+    """GMGN data, back-filled from the bonding curve for tokens GMGN hasn't priced
+    yet (fresh inner-curve launches report price/market cap as 0)."""
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(2) as ex:
+        fg = ex.submit(gmgn_token_info, token)
+        fc = ex.submit(lambda: run_node('routes.mjs', 'curveinfo', token, timeout=40))
+        g, c = fg.result(), None
+        try:
+            c = fc.result()
+        except Exception:
+            c = None
+    d = (g.get('data') if g and g.get('success') else None) or {'address': token}
+    ci = c.get('data') if c and c.get('success') else None
+    if ci and ci.get('route', {}).get('venue') == 'direct':
+        bnb = bnb_usdt_price()
+        if bnb and ci.get('priceBnb'):
+            if not d.get('price'):
+                d['price'] = ci['priceBnb'] * bnb
+            if not d.get('market_cap') and ci.get('mcapBnb'):
+                d['market_cap'] = ci['mcapBnb'] * bnb
+        if d.get('buy_tax') in (None, 0, 0.0) and ci.get('buyTax') is not None:
+            d['buy_tax'] = ci['buyTax']
+        # GMGN reports 0 for unchecked curve tokens; trust the curve when it knows, else unknown.
+        d['sell_tax'] = ci['sellTax'] if ci.get('sellTax') is not None else (d.get('sell_tax') or None)
+        if not d.get('liquidity'):
+            d['liquidity'] = None  # curve reserves aren't AMM liquidity; don't show $0
+        d['progress'] = ci.get('progress')
+        d['curve'] = True
+        d['launchpad'] = d.get('launchpad') or ci['route'].get('platform')
+    if not g or not g.get('success'):
+        if not ci:
+            return g or {'success': False, 'error': {'message': '代币信息不可用'}}
+    return {'success': True, 'data': d}
 
 
 _bnb_px = {'v': None, 't': 0.0}
@@ -202,7 +274,7 @@ class Handler(BaseHTTPRequestHandler):
             token = query.get('token', [''])[0]
             if not valid_token(token):
                 return self.send({'success': False, 'error': {'message': 'Invalid token address'}}, 400)
-            return self.send(gmgn_token_info(token))
+            return self.send(token_info(token))
         if path == '/panel.js':
             b = Path(__file__).with_name('panel.js').read_bytes()
             self.send_response(200)
