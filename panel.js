@@ -3,10 +3,28 @@ const BNB = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
 const USDT = '0x55d398326f99059fF775485246999027B3197955';
 const $ = id => document.getElementById(id);
 
-const KNOWN = {
-  [BNB.toLowerCase()]: {address: BNB, symbol: 'BNB', name: 'BNB', decimals: 18, cls: 'bnb'},
-  [USDT.toLowerCase()]: {address: USDT, symbol: 'Tether USD', name: 'Tether USD', decimals: 18, cls: 'usdt', symbolShort: 'USDT'},
-};
+// Curated default token list (symbol, address, logo). Mirrors what a real
+// BSC trading UI offers out of the box; discovered tokens get appended at runtime.
+const TW = a => `https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/smartchain/assets/${a}/logo.png`;
+const DEFAULT_TOKENS = [
+  {address: BNB, symbol: 'BNB', name: 'BNB', cls: 'bnb', logo: 'https://gmgn.ai/external-res/a477e8924def57eea4994c5a1d874f8b.webp'},
+  {address: USDT, symbol: 'USDT', name: 'Tether USD', cls: 'usdt', logo: 'https://gmgn.ai/external-res/9b392f75b01799a82ba73a6f61355599.webp'},
+  {address: '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d', symbol: 'USDC', name: 'USD Coin', logo: 'https://gmgn.ai/external-res/4f16b3a2e75ccf0e01bf47ad742b9507_v2l.webp'},
+  {address: '0xc5f0f7b66764F6ec8C8Dff7BA683102295E16409', symbol: 'FDUSD', name: 'First Digital USD', logo: TW('0xc5f0f7b66764F6ec8C8Dff7BA683102295E16409')},
+  {address: '0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56', symbol: 'BUSD', name: 'Binance USD', logo: 'https://gmgn.ai/external-res/2bc2b7925c232acbbc49cfef29380f1d.webp'},
+  {address: '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c', symbol: 'WBNB', name: 'Wrapped BNB', logo: 'https://gmgn.ai/external-res/a477e8924def57eea4994c5a1d874f8b.webp'},
+  {address: '0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c', symbol: 'BTCB', name: 'Bitcoin BEP20', logo: 'https://gmgn.ai/external-res/1e4010ae537288798c5367f33eae13b3.webp'},
+  {address: '0x2170Ed0880ac9A755fd29B2688956BD959F933F8', symbol: 'ETH', name: 'Ethereum', logo: 'https://gmgn.ai/external-res/c4193aef2f69ed71ced3fcf723b5c6af.webp'},
+  {address: '0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82', symbol: 'CAKE', name: 'PancakeSwap', logo: 'https://gmgn.ai/external-res/0345128a31d504789cb0a579babb9b5f.webp'},
+  {address: '0xbA2aE424d960c26247Dd6c32edC70B295c744C43', symbol: 'DOGE', name: 'Dogecoin', logo: TW('0xbA2aE424d960c26247Dd6c32edC70B295c744C43')},
+  {address: '0x1D2F0da169ceB9fC7B3144628dB156f3F6c60dBE', symbol: 'XRP', name: 'XRP', logo: TW('0x1D2F0da169ceB9fC7B3144628dB156f3F6c60dBE')},
+  {address: '0x3EE2200Efb3400fAbB9AacF31297cBdD1d435D47', symbol: 'ADA', name: 'Cardano', logo: TW('0x3EE2200Efb3400fAbB9AacF31297cBdD1d435D47')},
+  {address: '0xF8A0BF9cF54Bb92F17374d9e9A321E6a111a51bD', symbol: 'LINK', name: 'Chainlink', logo: TW('0xF8A0BF9cF54Bb92F17374d9e9A321E6a111a51bD')},
+  {address: '0xBf5140A22578168FD562DCcF235E5D43A02ce9B1', symbol: 'UNI', name: 'Uniswap', logo: TW('0xBf5140A22578168FD562DCcF235E5D43A02ce9B1')},
+  {address: '0x4338665CBB7B2485A8855A139b75D5e34AB0DB94', symbol: 'LTC', name: 'Litecoin', logo: TW('0x4338665CBB7B2485A8855A139b75D5e34AB0DB94')},
+];
+const KNOWN = {};
+for (const t of DEFAULT_TOKENS) KNOWN[t.address.toLowerCase()] = {decimals: 18, ...t, symbolShort: t.symbol};
 const PAIRS = [['USDT', 'BNB', 'USDT → BNB'], ['BNB', 'USDT', 'BNB → USDT']];
 
 const state = {
@@ -69,7 +87,10 @@ async function loadWallet() {
   renderBalances();
 }
 async function ensureMeta(addrs, force) {
-  const want = [...new Set(addrs.map(a => a.toLowerCase()).filter(a => a !== BNB.toLowerCase()))];
+  // BNB & USDT are base assets: balances come from dedicated fields and their
+  // logos live in KNOWN — don't run a per-token meta query that would overwrite them.
+  const base = [BNB.toLowerCase(), USDT.toLowerCase()];
+  const want = [...new Set(addrs.map(a => a.toLowerCase()).filter(a => !base.includes(a)))];
   const need = force ? want : want.filter(a => !(a in state.balances));
   try {
     const url = '/meta' + (need.length ? '?tokens=' + encodeURIComponent(need.join(',')) : '');
@@ -333,16 +354,33 @@ function renderHistory(list, boxId) {
   const box = $(boxId); if (!box) return;
   if (!list.length) { box.innerHTML = '<div class="empty">暂无兑换记录</div>'; return; }
   box.innerHTML = '';
+  const base = [BNB.toLowerCase(), USDT.toLowerCase()];
   for (const o of list) {
     const got = o.status === 'FINISHED' ? trim(o.toTokenActualQty) : '…';
+    // the tradable (meme) side — whichever leg isn't BNB/USDT — is the CA worth copying
+    const ca = [o.toToken, o.fromToken].find(a => a && !base.includes(a.toLowerCase())) || o.toToken || o.fromToken;
     const el = document.createElement('div'); el.className = 'li';
-    el.innerHTML = `<div><div class="pair-l">${trim(o.fromTokenQty)} ${o.fromTokenName} → ${got} ${o.toTokenName}</div>`
+    el.innerHTML = `<div style="min-width:0"><div class="pair-l">${trim(o.fromTokenQty)} ${o.fromTokenName} → ${got} ${o.toTokenName}</div>`
       + `<div class="meta">${(o.bookTime || '').replace('T', ' ').slice(0, 19)}`
       + (o.txHash ? ` · <a href="https://bscscan.com/tx/${o.txHash}" target="_blank" rel="noopener">链上</a>` : '') + `</div></div>`
-      + `<span class="st st-${o.status}">${o.status}</span>`;
+      + `<div style="display:flex;align-items:center;gap:8px;flex:none">`
+      + (ca && !base.includes(ca.toLowerCase()) ? `<button class="copyca" title="复制该代币合约 / 点按载入兑换" data-ca="${ca}">复制CA</button>` : '')
+      + `<span class="st st-${o.status}">${o.status}</span></div>`;
     box.appendChild(el);
   }
+  for (const b of box.querySelectorAll('.copyca')) b.onclick = () => copyCA(b.dataset.ca, b);
 }
+async function copyCA(ca, btn) {
+  try { await navigator.clipboard.writeText(ca); }
+  catch { const t = document.createElement('textarea'); t.value = ca; document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove(); }
+  const old = btn.textContent; btn.textContent = '已复制'; btn.classList.add('ok');
+  setTimeout(() => { btn.textContent = old; btn.classList.remove('ok'); }, 1400);
+}
+// double-click a copy button loads that CA straight into the swap's "receive" side
+document.addEventListener('dblclick', e => {
+  const b = e.target.closest?.('.copyca'); if (!b) return;
+  state.to = b.dataset.ca; showView('swap'); afterPairChange();
+});
 async function loadHistory() {
   try {
     const x = await (await fetch('/orders')).json();
