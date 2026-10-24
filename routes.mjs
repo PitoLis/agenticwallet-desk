@@ -26,6 +26,7 @@ export const PLATFORMS = {
   gangpair: {name: 'Gang Pair', site: 'gang.fun', pad: '0x1B8F3f69DFa0a7F63d308C7EB0Fd38D8b099966E'},
   moat: {name: 'MOAT', site: 'moat.fun', pad: '0xa954c7cf3aac9b31138cc2137a86ec2b28ab4729', fairSlot: '0x873e8ff7eba0863b2c4fc615b3c0cb33752f472e'},
   flapagent: {name: 'Flap Agent 曲线', site: 'flap.sh', factory: '0xC55820f24015bE7c4f18949D9e1363A3609B300e', portal: '0x49387D2E6cbF8FefE856e3FBc3E98a01aC3af062'},
+  cycpad: {name: 'Cycpad', site: 'cycpad.fun', factory: '0x0ff93d38e6975800A42B0693b58009DFAE061f26'},
   units: {name: 'UNITS', site: 'units-agentic.fun', token: '0xcD5F5cc018cE0650Bb4957A2853d24b4b4072A1D', curve: '0xd254D781363ba9e96A7B1dc39BabC5f735762682'},
 };
 
@@ -69,6 +70,7 @@ async function wallet() {
   WALLET = w.data.addresses.find(x => x.binanceChainId === '56').address;
   return WALLET;
 }
+const deadline = () => BigInt(Math.floor(Date.now() / 1000) + 600);
 const toWei = (v, d = 18) => { const [a, b = ''] = String(v).split('.'); return BigInt(a || '0') * 10n ** BigInt(d) + BigInt((b + '0'.repeat(d)).slice(0, d) || '0'); };
 const fromWei = (v, d = 18) => { const s = BigInt(v).toString().padStart(d + 1, '0'); return (s.slice(0, -d) + '.' + s.slice(-d)).replace(/\.?0+$/, '') || '0'; };
 const balanceOf = async (token, who) => BigInt((await tryCall(token, enc('balanceOf(address)', who))) || '0x0');
@@ -79,6 +81,18 @@ export async function detect(ca) {
   ca = ca.toLowerCase();
   const P = PLATFORMS;
   if (ca === P.units.token.toLowerCase()) return {platform: 'units', venue: 'direct', ...P.units};
+
+  // Cycpad: token is its own curve; factory.isToken(ca). Graduated → PancakeSwap via baw.
+  if (ca.endsWith('cccc')) {
+    const it = await tryCall(P.cycpad.factory, enc('isToken(address)', ca));
+    if (it && BigInt(it) === 1n) {
+      const g = await tryCall(ca, sel('graduated()'));
+      const q = await tryCall(ca, sel('quoteToken()'));
+      const quote = q ? toAddr(words(q)[0]) : ZERO;
+      const graduated = !!(g && BigInt(g) === 1n);
+      return {platform: 'cycpad', venue: graduated ? 'baw' : 'direct', graduated, quote, bnbQuote: quote === ZERO};
+    }
+  }
 
   // Gang Soft: curves(ca).creator != 0
   const gs = words(await tryCall(P.gang.pad, enc('curves(address)', ca)));
@@ -131,6 +145,15 @@ export async function quote(ca, side, amount) {
     if (r.platform === 'agentpad') out = BigInt('0x' + words(await call(ca, enc('quoteBuy(uint256)', inAmt)))[0]);
     else if (r.platform === 'gang' || r.platform === 'moat') out = BigInt('0x' + words(await call(r.pad, enc('quoteBuy(address,address,uint256)', ca, me, inAmt)))[0]);
     else if (r.platform === 'units') out = BigInt('0x' + words(await call(r.curve, enc('quoteBuy(address,uint256)', me, inAmt)))[0]);
+    else if (r.platform === 'cycpad') {
+      if (!r.bnbQuote) throw new Error('该 Cycpad 代币以 USDT 计价，暂只支持 BNB 计价的内盘');
+      const can = await tryCall(ca, enc('canBuy(address)', me));
+      if (!can || BigInt(can) !== 1n) throw new Error('当前钱包不能买这个 Cycpad 代币（需要 Agent ID 或在该币的买家白名单里）');
+      const w = words(await call(ca, enc('quoteBuyFor(address,uint256)', me, inAmt)));
+      out = BigInt('0x' + w[0]);
+      const refund = BigInt('0x' + (w[2] || '0'));
+      if (refund > 0n) note = '曲线剩余额度不足，多出的 ' + fromWei(refund) + ' BNB 会退回';
+    }
     else if (r.platform === 'flapagent') {
       if (!r.bnbQuote) throw new Error('该 Flap Agent 市场用非 BNB 计价（' + r.quote + '），暂不支持直接 BNB 买入');
       const w = words(await call(r.portal, enc('quoteBuy(address,address,uint256)', r.market, me, inAmt)));
@@ -142,7 +165,7 @@ export async function quote(ca, side, amount) {
       : await balanceOf(r.platform === 'units' ? r.token : ca, me);
     inAmt = amount === 'all' ? bal : toWei(amount);
     if (inAmt > bal) throw new Error('卖出数量超过持仓');
-    if (r.platform === 'agentpad') out = BigInt('0x' + (words(await call(ca, enc('quoteSell(uint256)', inAmt), me))[0] || '0'));
+    if (r.platform === 'agentpad' || r.platform === 'cycpad') out = BigInt('0x' + (words(await call(ca, enc('quoteSell(uint256)', inAmt), me))[0] || '0'));
     else if (r.platform === 'gang' || r.platform === 'moat') {
       const q = await tryCall(r.pad, enc('quoteSell(address,address,uint256)', ca, me, inAmt));
       out = q ? BigInt('0x' + words(q)[0]) : 0n;
@@ -177,13 +200,16 @@ export async function trade(ca, side, amount, slippagePct = 10) {
   if (q.venue === 'baw') return {ok: false, venue: 'baw', route: q.route, error: 'use baw market-order for this token'};
   const r = q.route, inAmt = BigInt(q.in), out = BigInt(q.out);
   const minOut = out * BigInt(Math.max(0, Math.round((100 - Number(slippagePct)) * 100))) / 10000n;
+  if (r.platform === 'cycpad' && minOut === 0n) return {ok: false, route: r, error: '报价为 0，无法设置最小到账（可能已毕业或卖出数量过小）'};
   if (side === 'buy') {
     if (r.platform === 'agentpad') return {route: r, ...(await bawCall(ca, enc('buyWithBNBMinOut(uint256)', minOut), inAmt))};
     if (r.platform === 'gang' || r.platform === 'moat') return {route: r, ...(await bawCall(r.pad, enc('buy(address,uint256)', ca, minOut), inAmt))};
     if (r.platform === 'units') return {route: r, ...(await bawCall(r.curve, enc('buy(uint256)', minOut), inAmt))};
+    if (r.platform === 'cycpad') return {route: r, ...(await bawCall(ca, enc('buyWithQuote(uint256,uint256,uint256)', inAmt, minOut, deadline()), inAmt))};
     if (r.platform === 'flapagent') return {route: r, ...(await bawCall(r.portal, enc('buy(address,uint256)', r.market, minOut), inAmt))};
   } else {
     if (r.platform === 'agentpad') return {route: r, ...(await bawCall(ca, enc('sellWithMin(uint256,uint256)', inAmt, minOut), 0))};
+    if (r.platform === 'cycpad') return {route: r, ...(await bawCall(ca, enc('sell(uint256,uint256,uint256)', inAmt, minOut, deadline()), 0))}; // no approval needed
     if (r.platform === 'flapagent') {
       const all = inAmt.toString() === r.holding;
       return {route: r, ...(await bawCall(r.portal, all ? enc('sellAll(address,uint256)', r.market, minOut) : enc('sellBps(address,uint256,uint256)', r.market, inAmt * 10000n / BigInt(r.holding || 1), minOut), 0))};

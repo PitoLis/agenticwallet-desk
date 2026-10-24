@@ -22,6 +22,7 @@
 
 ## 功能
 
+- **U 计价显示**：支付和收到的数量后面都用括号标出约合多少 U（按实时 BNB/USDT 报价换算），最小到账和历史记录同样显示。
 - **聚合兑换**：任意代币互换、USDT⇄BNB 快捷对、方向反转、滑点（自动/0.5/1/3/自定义）与 Gas（低/中/高）、防抖自动报价、价格影响、**25%/50%/75%/最大** 比例快捷填入、订单历史轮询到成交。
 - **代币信息展示**：代币选择器里粘贴合约地址即展示该币 **logo / 名称 / 价格 / 市值 / 流动性 / 持有人 / 买卖税 / 貔貅·rug 风险徽章**（数据来自 GMGN），而不是裸"导入"。
 - **Four.meme 抢购监控 + 自动买入**：事件驱动监听指定模板（preset）的新币上链，命中后自动用固定 BNB 预算走正确入口买入；**买不进（白名单/revert）自动跳过下一个，不烧 gas**；买到后桌面弹窗 + 面板事件；持仓涨到 10 倍弹窗提醒（只提醒不自动卖）。
@@ -75,6 +76,7 @@ four_watch.mjs  (独立后台进程)
 | MOAT 曲线（moat.fun） | 曲线 pad `curves(ca)` | 曲线直调 | 同 Gang 接口 |
 | Flap Agent 曲线（flap.sh） | Agent Factory `marketOfToken(ca)` | 曲线直调 | 买到的是曲线份额（非 ERC20），毕业后 claim；仅支持 BNB 计价市场 |
 | UNITS（units-agentic.fun） | 精确匹配代币地址 | 曲线直调 | `buy` / `sell` |
+| Cycpad（cycpad.fun） | 尾号 `cccc` + Factory `isToken(ca)` | 内盘曲线直调，毕业后走聚合 | `buyWithQuote(budget,minOut,deadline)` 付 BNB / `sell(amount,minOut,deadline)`，卖出不需要授权；买入需 Agent ID 或在该币买家白名单 |
 | Gang Pair / Gang V2 | V2 pad `curves(ca)` | 暂不支持自动交易 | 以 ERC20（bStocks / GANG / WBNB）计价，需先换出报价代币并授权 |
 | MOAT 占席（fair slot） | moat.fun board `mode=fair` | 暂未接入 | `fillSlot` 按席位定额付款，窗口期不可卖 |
 

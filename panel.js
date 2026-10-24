@@ -27,10 +27,11 @@ const KNOWN = {};
 for (const t of DEFAULT_TOKENS) KNOWN[t.address.toLowerCase()] = {decimals: 18, ...t, symbolShort: t.symbol};
 const PLATFORM_NAMES = {
   fourmeme: 'four.meme', flap: 'Flap', flapagent: 'Flap Agent', agentpad: 'AgentPad', gang: 'Gang',
-  gangpair: 'Gang Pair', moat: 'MOAT', units: 'UNITS', pancake: '外盘 PancakeSwap',
+  gangpair: 'Gang Pair', cycpad: 'Cycpad', moat: 'MOAT', units: 'UNITS', pancake: '外盘 PancakeSwap',
 };
 const PAIRS = [['USDT', 'BNB', 'USDT → BNB'], ['BNB', 'USDT', 'BNB → USDT']];
 
+const STABLES = new Set(['0x55d398326f99059ff775485246999027b3197955', '0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d', '0xc5f0f7b66764f6ec8c8dff7ba683102295e16409', '0xe9e7cea3dedca5984780bafc599bd69add087d56']);
 const state = {
   from: BNB, to: USDT, slippage: 'auto', gas: 'HIGH',
   wallet: null, balances: {}, tokens: {}, quote: null, quoteSeq: 0,
@@ -56,6 +57,31 @@ function trim(v) {
   return n.toPrecision(6).replace(/\.?0+$/, '');
 }
 
+// USD value of an amount of a token: stablecoins 1:1, BNB/WBNB via cached BNB price,
+// anything else priced through the current quote's BNB/USDT leg.
+async function loadBnbPrice() {
+  const had = !!state.bnbUsd;
+  try { const x = await (await fetch('/bnbprice')).json(); if (x.success && x.data.usdt) state.bnbUsd = x.data.usdt; } catch {}
+  renderUsd();
+  if (!had && state.bnbUsd) loadHistory();
+}
+function usdOf(addr, amount) {
+  const a = (addr || '').toLowerCase(), n = parseFloat(amount);
+  if (!isFinite(n) || n <= 0) return null;
+  if (STABLES.has(a)) return n;
+  if ((a === BNB.toLowerCase() || a === '0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c') && state.bnbUsd) return n * state.bnbUsd;
+  return null;
+}
+const usdNum = v => v >= 1 ? v.toLocaleString('en-US', {maximumFractionDigits: 2}) : v.toPrecision(3);
+function fmtUsd(v) { return v == null ? '' : `（≈ ${usdNum(v)} U）`; }
+function renderUsd() {
+  const fa = $('fromAmt').value.trim(), ta = (state.quote && state.quote.toCoinAmount) || '';
+  let fu = usdOf(state.from, fa), tu = usdOf(state.to, ta);
+  // a meme leg takes the value of the other (priced) leg, since the quote equates them
+  if (fu == null && tu != null) fu = tu;
+  if (tu == null && fu != null && ta) tu = fu;
+  $('fromUsd').textContent = fmtUsd(fu); $('toUsd').textContent = ta ? fmtUsd(tu) : '';
+}
 function renderTokButtons() {
   for (const [side, addr] of [['from', state.from], ['to', state.to]]) {
     const info = tokenInfo(addr);
@@ -192,7 +218,7 @@ let quoteTimer = null;
 function scheduleQuote() {
   clearTimeout(quoteTimer);
   const amt = $('fromAmt').value.trim();
-  state.quote = null; $('quoteBox').classList.remove('show');
+  state.quote = null; $('quoteBox').classList.remove('show'); renderUsd();
   if (!amt || !(parseFloat(amt) > 0)) { $('toAmt').value = ''; setCta(); return; }
   setCta('quoting'); quoteTimer = setTimeout(getQuote, 380);
 }
@@ -204,7 +230,7 @@ async function getQuote() {
       body: JSON.stringify({fromToken: state.from, toToken: state.to, qty: amt, slippage: state.slippage, fromSymbol: sym(tokenInfo(state.from)), toSymbol: sym(tokenInfo(state.to))})})).json();
     if (seq !== state.quoteSeq) return;
     if (!x.success) throw Error(x.error?.message || '报价失败');
-    state.quote = x.data; $('toAmt').value = trim(x.data.toCoinAmount);
+    state.quote = x.data; $('toAmt').value = trim(x.data.toCoinAmount); renderUsd();
     renderQuote(x.data, amt); setStatus('报价完成', false);
   } catch (e) { if (seq === state.quoteSeq) { $('toAmt').value = ''; setStatus('报价失败：' + e.message, false); } }
   setCta();
@@ -213,7 +239,9 @@ function renderQuote(d, payAmt) {
   const got = parseFloat(d.toCoinAmount), pay = parseFloat(payAmt);
   $('qRate').textContent = `1 ${d.fromCoinSymbol} ≈ ${trim(got / pay)} ${d.toCoinSymbol}`;
   const slip = typeof d.slippage === 'number' ? d.slippage : parseFloat(d.slippage || 0);
-  $('qMin').textContent = `${trim(got * (1 - slip))} ${d.toCoinSymbol}`;
+  const minOut = got * (1 - slip);
+  const toU = usdOf(state.to, d.toCoinAmount) ?? usdOf(state.from, payAmt);
+  $('qMin').textContent = `${trim(minOut)} ${d.toCoinSymbol}` + (toU != null ? ` （≈ ${usdNum(toU * (1 - slip))} U）` : '');
   const pct = slip * 100, el = $('qImpact');
   el.textContent = pct ? pct.toFixed(2) + '%（滑点上限）' : '自动';
   el.className = 'impact ' + (pct <= 1 ? 'lo' : pct <= 5 ? 'mid' : 'hi');
@@ -400,7 +428,8 @@ function renderHistory(list, boxId) {
     // the tradable (meme) side — whichever leg isn't BNB/USDT — is the CA worth copying
     const ca = [o.toToken, o.fromToken].find(a => a && !base.includes(a.toLowerCase())) || o.toToken || o.fromToken;
     const el = document.createElement('div'); el.className = 'li';
-    el.innerHTML = `<div style="min-width:0"><div class="pair-l">${trim(o.fromTokenQty)} ${o.fromTokenName} → ${got} ${o.toTokenName}${o.direct ? ` <span class="ptag">${PLATFORM_NAMES[o.platform] || o.platform}</span>` : ''}</div>`
+    const hu = o.status === 'FAILED' ? null : (usdOf(o.fromToken, o.fromTokenQty) ?? usdOf(o.toToken, o.toTokenActualQty));
+    el.innerHTML = `<div style="min-width:0"><div class="pair-l">${trim(o.fromTokenQty)} ${o.fromTokenName} → ${got} ${o.toTokenName}${hu != null ? ` <span class="hu">${fmtUsd(hu)}</span>` : ''}${o.direct ? ` <span class="ptag">${PLATFORM_NAMES[o.platform] || o.platform}</span>` : ''}</div>`
       + `<div class="meta">${(o.bookTime || '').replace('T', ' ').slice(0, 19)}`
       + (o.txHash ? ` · <a href="https://bscscan.com/tx/${o.txHash}" target="_blank" rel="noopener">链上</a>` : '') + `</div></div>`
       + `<div style="display:flex;align-items:center;gap:8px;flex:none">`
@@ -508,7 +537,8 @@ function bootstrap() {
   });
   $('pickerInput').addEventListener('input', e => renderPickerList(e.target.value.trim()));
   $('picker').addEventListener('click', e => { if (e.target === $('picker')) $('picker').close(); });
-  loadWallet(); loadHistory(); loadStatus(); loadAlerts();
+  loadWallet(); loadHistory(); loadStatus(); loadAlerts(); loadBnbPrice();
+  setInterval(loadBnbPrice, 30000);
   setInterval(loadStatus, 6000);
   setInterval(loadAlerts, 8000);
 }

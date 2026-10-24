@@ -96,6 +96,24 @@ def gmgn_token_info(token):
     return {'success': True, 'data': out}
 
 
+_bnb_px = {'v': None, 't': 0.0}
+
+
+def bnb_usdt_price():
+    """BNB price in USDT from a 1 BNB baw quote, cached 30s."""
+    import time
+    if _bnb_px['v'] and time.time() - _bnb_px['t'] < 30:
+        return _bnb_px['v']
+    q = run_baw(['market-order', 'quote', '--binanceChainId', CHAIN, '--fromTokenQty', '1',
+                 '--fromToken', BNB, '--toToken', USDT, '--slippage', 'auto'], timeout=20)
+    try:
+        v = float(q['data']['toCoinAmount'])
+        _bnb_px.update(v=v, t=time.time())
+        return v
+    except Exception:
+        return _bnb_px['v']
+
+
 def run_node(script, *args, timeout=35):
     p = subprocess.run(["node", str(Path(__file__).with_name(script)), *args],
                        capture_output=True, text=True, timeout=timeout, env=_env())
@@ -153,6 +171,9 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(run_baw(['market-order', 'list', '--orderId', oid]))
         if path == '/orders':
             return self.send(run_baw(['market-order', 'list', '--binanceChainId', CHAIN, '--pageSize', '15']))
+        if path == '/bnbprice':
+            v = bnb_usdt_price()
+            return self.send({'success': v is not None, 'data': {'usdt': v}})
         if path == '/route':
             token = query.get('token', [''])[0]
             if not valid_token(token):
