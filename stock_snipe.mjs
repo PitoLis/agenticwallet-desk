@@ -28,6 +28,9 @@ import {homedir} from 'node:os';
 import WebSocket from 'ws';
 import {keccak_256} from '@noble/hashes/sha3.js';
 const run = promisify(execFile);
+// Which baw CLI to drive. Point at a second instance (own BINANCE_BAW_DIR) to run
+// the sniper on a different wallet than the panel, e.g. SNIPE_BAW=~/.baw2-cli/bin/baw
+const BAW_BIN = (process.env.SNIPE_BAW || 'baw').replace(/^~(?=\/)/, homedir());
 
 const CORE = '0xebe7b6c1089d9f72ad07f34e36d898e44e5e27f3';
 const TOOLS = '0x97da82f56fef1a0b974587a48135fa9da2a4e905';
@@ -51,7 +54,7 @@ const CFG = {
   forwardTo: (process.env.SNIPE_FORWARD_TO || '0x4127a425021408c260ff6b31b1c419ae3d4e6216').toLowerCase(),
   wss: (process.env.SNIPE_WSS || 'wss://bsc-rpc.publicnode.com,wss://bsc.publicnode.com').split(','),
   rpcs: (process.env.SNIPE_RPC || 'https://bsc-dataseed.binance.org,https://bsc.publicnode.com').split(','),
-  statePath: homedir() + '/.config/stock-snipe-state.json',
+  statePath: process.env.SNIPE_STATE || (homedir() + '/.config/stock-snipe-state.json'),
   statusPath: homedir() + '/.config/stock-snipe-status.json',
   eventsPath: homedir() + '/.config/four-watch-events.json', // shared with the panel's event feed
 };
@@ -83,7 +86,7 @@ function parseJsonLoose(s) {
   if (!a.length) throw new Error('no JSON'); return JSON.parse(s.slice(Math.min(...a), Math.max(...e) + 1));
 }
 async function baw(args, timeout = 60000) {
-  try { const {stdout} = await run('baw', [...args, '--json'], {timeout, maxBuffer: 4e6, env: env()}); return parseJsonLoose(stdout); }
+  try { const {stdout} = await run(BAW_BIN, [...args, '--json'], {timeout, maxBuffer: 4e6, env: env()}); return parseJsonLoose(stdout); }
   catch (e) { try { return parseJsonLoose(e.stdout || ''); } catch { return {success: false, error: {message: e.message.split('\n')[0]}}; } }
 }
 let rpcIdx = 0;
@@ -249,17 +252,32 @@ async function handle(logs) {
   }
 }
 
-let lastScanned = 0;
+let lastScanned = 0, scanning = false, wantHead = 0, backoffUntil = 0;
+// One getLogs in flight at a time: WSS heads and the 0.5s poll only raise the
+// target; overlapping calls were what tripped the free RPC's rate limit.
 async function scanTo(head) {
+  wantHead = Math.max(wantHead, head);
+  if (scanning || Date.now() < backoffUntil) return;
+  scanning = true;
+  try { while (wantHead > lastScanned) { if (!(await scanOnce(wantHead))) break; } }
+  finally { scanning = false; }
+}
+async function scanOnce(head) {
   if (!lastScanned) lastScanned = head - 1;
-  if (head <= lastScanned) return;
+  if (head <= lastScanned) return true;
   const from = lastScanned + 1;
   try {
     const logs = await rpc('eth_getLogs', [{address: CORE, topics: [TC_TOPIC, PRESET_TOPIC], fromBlock: '0x' + from.toString(16), toBlock: '0x' + head.toString(16)}]);
     lastScanned = head; status.head = head;
     logs.sort((a, b) => parseInt(a.blockNumber, 16) - parseInt(b.blockNumber, 16) || parseInt(a.logIndex, 16) - parseInt(b.logIndex, 16));
     await handle(logs);
-  } catch (e) { log('[scan]', e.message.slice(0, 70)); }
+    return true;
+  } catch (e) {
+    // Range stays un-scanned and is retried next tick, so no blocks are skipped.
+    if (/limit|rate|429|too many/i.test(e.message)) { backoffUntil = Date.now() + 1500; rpcIdx = (rpcIdx + 1) % CFG.rpcs.length; }
+    else log('[scan]', e.message.slice(0, 70));
+    return false;
+  }
 }
 function startWss(url) {
   const ws = new WebSocket(url, {handshakeTimeout: 8000}); let up = false;
