@@ -109,12 +109,15 @@ const allowance = async (t, o, s) => BigInt(await call(t, enc('allowance(address
 const tokenPhase = async t => Number(BigInt(await call(t, sel('tokenPhase()')) || '0x0'));
 
 let WALLET = null;
+const recentHits = [];
+const noteHit = h => { recentHits.unshift({ts: Date.now(), ...h}); recentHits.length = Math.min(recentHits.length, 20); };
 let busy = false;
 const status = {startedAt: Date.now(), hits: 0, lastHit: null, head: 0, wss: 0};
 function writeStatus() {
   const s = loadState();
   try { writeFileSync(CFG.statusPath, JSON.stringify({...status, ts: Date.now(), pid: process.pid, armed: CFG.armed, max: CFG.max,
-    target: fromWei(CFG.target), forwardTo: CFG.forwardTo, pollMs: CFG.pollMs,
+    target: fromWei(CFG.target), forwardTo: CFG.forwardTo, pollMs: CFG.pollMs, wallet: WALLET,
+    stocks: Object.values(STOCKS), preset: PRESET.toString(), recent: recentHits.slice(0, 10),
     bought: Object.keys(s.bought).length, forwarded: Object.values(s.bought).filter(b => b.forwarded).length,
     skipped: Object.keys(s.skipped).length}, null, 2)); } catch {}
 }
@@ -236,6 +239,7 @@ async function handle(logs) {
     try {
       const r = await snipe(token, quote, sym);
       const s2 = loadState(), now = Math.floor(Date.now() / 1000);
+      noteHit({token, sym, result: r.ok ? (r.sim ? '模拟可买' : '已买入') : '跳过', reason: r.reason || null, tx: r.tx || null});
       if (r.ok && r.sim) { log('  模拟：可买入，未下单'); s2.skipped[token] = {at: now, reason: 'simulated'}; }
       else if (r.ok) {
         s2.bought[token] = {at: now, stock: sym, target: fromWei(CFG.target), tx: r.tx};
