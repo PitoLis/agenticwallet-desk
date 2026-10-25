@@ -135,6 +135,95 @@ function showView(v) {
   if (v === 'activity') { loadHistory(); loadAlerts(); }
 }
 window.showView = showView;
+window.copyFundAddr = copyFundAddr;
+window.confirmXfer = confirmXfer; window.closeXfer = closeXfer; window.doXfer = doXfer; window.xferFillMax = xferFillMax;
+
+// ---------- fund / deposit (inline, always visible) ----------
+function renderFund(a) {
+  if (!a || !/^0x[0-9a-fA-F]{40}$/.test(a)) { $('fundAddr').textContent = '地址读取失败'; return; }
+  $('fundAddr').textContent = a;
+  const box = $('fundQr');
+  if (box.dataset.addr !== a) {
+    const qr = qrcode(0, 'M');           // global from qrcode.js (UMD)
+    qr.addData(a); qr.make();
+    box.innerHTML = qr.createSvgTag({cellSize: 5, margin: 2, scalable: true});
+    box.dataset.addr = a;
+  }
+}
+function copyFundAddr(btn) {
+  const a = state.wallet || $('fundAddr').textContent.trim();
+  copyText(a, btn);
+}
+
+// ---------- transfer out ----------
+function xferOptions() {
+  // BNB/USDT first, then any other token the wallet holds (from state.balances).
+  const seen = new Set();
+  const opts = [{address: BNB, symbol: 'BNB'}, {address: USDT, symbol: 'USDT'}];
+  for (const [addr, tok] of Object.entries(state.tokens)) {
+    if (tok?.symbol && !seen.has(addr) && !opts.some(o => o.address.toLowerCase() === addr.toLowerCase()))
+      opts.push({address: addr, symbol: tok.symbol});
+  }
+  return opts;
+}
+function renderXferTokens() {
+  const sel = $('xferToken'); if (!sel) return;
+  const cur = sel.value;
+  const opts = xferOptions();
+  sel.innerHTML = opts.map(o =>
+    `<option value="${o.address}">${o.symbol}${state.balances[o.address.toLowerCase()] ? ' · ' + state.balances[o.address.toLowerCase()] : (state.balances[BNB.toLowerCase()] && o.address === BNB ? ' · ' + state.balances[BNB.toLowerCase()] : '')}</option>`).join('');
+  if ([...sel.options].some(o => o.value === cur)) sel.value = cur;
+  xferShowBalance();
+}
+function xferShowBalance() {
+  const sel = $('xferToken'); if (!sel) return;
+  const bal = state.balances[sel.value.toLowerCase()];
+  $('xferBal').textContent = bal != null ? '余额 ' + bal : '';
+}
+function xferFillMax() {
+  const sel = $('xferToken'); if (!sel) return;
+  const bal = state.balances[sel.value.toLowerCase()];
+  if (bal != null) $('xferAmt').value = bal;
+}
+function confirmXfer() {
+  const out = $('xferOut'); out.className = 'xfer-out'; out.textContent = '';
+  const token = $('xferToken').value;
+  const to = $('xferTo').value.trim();
+  const amt = $('xferAmt').value.trim();
+  if (!/^0x[0-9a-fA-F]{40}$/.test(to)) { out.className = 'xfer-out err'; out.textContent = '接收地址无效(需 0x + 40 位十六进制)'; return; }
+  if (!amt || !(+amt > 0)) { out.className = 'xfer-out err'; out.textContent = '请输入正数数量'; return; }
+  const sym = $('xferToken').selectedOptions[0].textContent.split(' · ')[0];
+  $('xcToken').textContent = sym;
+  $('xcAmt').textContent = amt + ' ' + sym;
+  $('xcTo').textContent = to;
+  $('xferConfirm').hidden = false;
+}
+function closeXfer() { $('xferConfirm').hidden = true; }
+async function doXfer() {
+  const btn = $('xcGo'); btn.disabled = true; btn.textContent = '提交中…';
+  const out = $('xferOut');
+  try {
+    const x = await (await fetch('/transfer', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({token: $('xferToken').value, recipient: $('xferTo').value.trim(), amount: $('xferAmt').value.trim()})
+    })).json();
+    out.className = 'xfer-out';
+    if (x.success) {
+      const tx = x.data?.txHash, ex = x.data?.explorer;
+      out.innerHTML = `已广播,等待链上确认。Tx:${tx ? (ex ? `<a href="${ex}" target="_blank" rel="noopener">${tx.slice(0, 18)}…↗</a>` : tx) : '—'}`;
+      closeXfer();
+      setTimeout(loadWallet, 4000);
+    } else {
+      out.className = 'xfer-out err';
+      out.textContent = '转出失败:' + (x.error?.message || '未知错误');
+      if (/address book|地址簿|NOT_IN_ADDRESS/i.test(x.error?.message || '')) out.textContent += '(接收地址需先在 Binance App → 钱包 → 设置 → 地址簿 中添加)';
+    }
+  } catch (e) {
+    out.className = 'xfer-out err'; out.textContent = '请求失败:' + e.message;
+  } finally {
+    btn.disabled = false; btn.textContent = '确认转出';
+  }
+}
 
 // ---------- wallet ----------
 async function loadWallet() {
@@ -161,14 +250,15 @@ async function ensureMeta(addrs, force) {
       state.balances[k] = v.balance;
       KNOWN[k] = KNOWN[k] || state.tokens[k];
     }
-    $('walletAddr').textContent = state.wallet;
+    renderFund(state.wallet);
     drawBlockies(state.wallet);
     renderTokButtons();
-  } catch (e) { $('walletAddr').textContent = '余额读取失败：' + e.message; }
+  } catch (e) { $('fundAddr').textContent = '余额读取失败：' + e.message; }
 }
 function renderBalances() {
   const list = $('balList'); list.innerHTML = '';
   const shown = [BNB.toLowerCase(), USDT.toLowerCase(), ...Object.keys(state.tokens)].filter((v, i, a) => a.indexOf(v) === i);
+  try { renderXferTokens(); } catch {}
   for (const k of shown) {
     const info = tokenInfo(k), bal = state.balances[k] ?? '—';
     const el = document.createElement('div');
@@ -480,11 +570,14 @@ function renderAlerts(list, boxId) {
   box.innerHTML = '';
   for (const e of list.slice(0, 15)) {
     const t = new Date(e.ts).toLocaleString(), el = document.createElement('div'); el.className = 'li';
+    const src = e.source === 'gang' ? '<span class="st st-GANG">GANG</span>' : '<span class="st st-FOUR">FOUR</span>';
     if (e.type === 'bought')
       el.innerHTML = `<div><div class="pair-l">✅ 已买入 ${e.budgetBnb} BNB</div><div class="meta mono">${e.token}`
         + (e.tx ? ` · <a href="https://bscscan.com/tx/${e.tx}" target="_blank" rel="noopener">链上</a>` : '') + `</div><div class="meta">${t}</div></div><span class="st st-BOUGHT">BOUGHT</span>`;
     else if (e.type === 'tenx')
       el.innerHTML = `<div><div class="pair-l">🚀 到 ${e.mult}x</div><div class="meta mono">${e.token}</div><div class="meta">${t} · 可出本（卖出不自动）</div></div><span class="st st-10x">10x</span>`;
+    else if (e.source === 'gang')
+      el.innerHTML = `<div><div class="pair-l">${e.label || e.type}${e.symbol ? ' · ' + e.symbol : ''}${e.pct != null ? ' · ' + (+e.pct).toFixed(1) + '%' : ''}</div><div class="meta mono">${e.token || ''}</div><div class="meta">${t}</div></div>${src}`;
     else el.innerHTML = `<div><div class="pair-l">${e.type}</div><div class="meta mono">${e.token || ''}</div></div>`;
     box.appendChild(el);
   }
@@ -496,44 +589,59 @@ async function loadAlerts() {
   } catch {}
 }
 
-// ---------- monitor status ----------
+// ---------- monitor status (four + gang) ----------
 async function loadStatus() {
   try {
     const x = await (await fetch('/status')).json();
-    const live = x.data?.live, st = x.data?.status || {}, snipe = x.data?.kind === 'stock_snipe';
+    const F = x.data?.four || {live: false, status: {}}, G = x.data?.gang || {live: false, status: {}}, SN = x.data?.snipe || {live: false, status: {}};
+    const fst = F.status || {}, gst = G.status || {}, sst = SN.status || {};
+    const snipe = SN.live && !!sst?.wallet;   // stock sniper runs on its own wallet: show its dashboard when live
+    const anyLive = F.live || G.live || SN.live;
+    const anyArmed = (F.live && fst.armed) || (G.live && gst.armed) || (SN.live && sst.armed);
     const chip = $('monChip');
-    chip.className = 'chip' + (live ? (st.armed ? ' armed' : ' live') : ' off');
-    $('monChipText').textContent = live ? (st.armed ? '监控·实盘' : '监控·模拟') : '监控离线';
-    const ring = $('monRing'); ring.className = 'mon-ring' + (live ? ' live' : '');
+    chip.className = 'chip' + (anyLive ? (anyArmed ? ' armed' : ' live') : ' off');
+    $('monChipText').textContent = anyLive ? (anyArmed ? '监控·实盘' : '监控·模拟') : '监控离线';
+    // dashboard
+    const ring = $('monRing'); ring.className = 'mon-ring' + (anyLive ? ' live' : '');
     $('monTitle') && ($('monTitle').textContent = snipe ? '股票底池狙击' : '抢购监控');
-    $('monSub').textContent = !live ? '监控进程未运行'
-      : snipe ? `Agent ID 模板 · 底池 ${(st.stocks || []).join(' / ')} · 钱包 ${short(st.wallet || '')}`
-      : `${st.presetName || '模板'} · preset ${st.preset}`;
-    $('monPills').innerHTML = live
-      ? `<span class="pill ${st.armed ? 'arm' : 'dry'}">${st.armed ? '实盘' : '模拟'}</span><span class="pill on">运行中</span>`
-      : `<span class="pill off">离线</span>`;
-    const hb = st.ts ? new Date(st.ts).toLocaleTimeString() : '—';
-    const stats = snipe ? [
-      ['每个买入', Number(st.target || 0).toLocaleString() + ' 个（1%）', 'gold'],
-      ['已买 / 上限', `${st.bought ?? 0} / ${st.max ?? '—'}`, ''],
-      ['已转出', st.forwarded ?? 0, ''],
-      ['命中 / 跳过', `${st.hits ?? 0} / ${st.skipped ?? 0}`, ''],
-      ['最新区块', st.head ? st.head.toLocaleString() : '—', ''],
-      ['轮询 · WSS', `${st.pollMs ?? '—'}ms · ${st.wss ?? 0} 路`, ''],
-      ['转出地址', short(st.forwardTo || ''), ''],
-      ['心跳', hb, ''],
-    ] : [
-      ['买入预算', (st.budgetBnb ?? '—') + ' BNB', 'gold'],
-      ['最新区块', st.head ? st.head.toLocaleString() : '—', ''],
-      ['已买入', st.bought ?? 0, ''],
-      ['已跳过', st.skipped ?? 0, ''],
-      ['WSS 连接', (st.wss ?? 0) + ' 路', ''],
-      ['心跳', hb, ''],
-    ];
+    const hb = t => t ? new Date(t).toLocaleTimeString() : '—';
+    let sub, pills, stats;
+    if (snipe) {
+      sub = `Agent ID 模板 · 底池 ${(sst.stocks || []).join(' / ')} · 钱包 ${short(sst.wallet || '')}`;
+      pills = `<span class="pill ${sst.armed ? 'arm' : 'dry'}">${sst.armed ? '实盘' : '模拟'}</span><span class="pill on">运行中</span>`;
+      stats = [
+        ['每个买入', Number(sst.target || 0).toLocaleString() + ' 个（1%）', 'gold'],
+        ['已买 / 上限', `${sst.bought ?? 0} / ${sst.max ?? '—'}`, ''],
+        ['已转出', sst.forwarded ?? 0, ''],
+        ['命中 / 跳过', `${sst.hits ?? 0} / ${sst.skipped ?? 0}`, ''],
+        ['最新区块', sst.head ? sst.head.toLocaleString() : '—', ''],
+        ['轮询 · WSS', `${sst.pollMs ?? '—'}ms · ${sst.wss ?? 0} 路`, ''],
+        ['转出地址', short(sst.forwardTo || ''), ''],
+        ['心跳', hb(sst.ts), ''],
+      ];
+    } else {
+      sub = `four.meme:${F.live ? '在线' : '离线'}${F.live ? ' · ' + (fst.presetName || fst.preset || '') : ''}`
+        + `  ·  gang.fun:${G.live ? '在线' : '离线'}${G.live && gst.tokens ? ' · ' + gst.tokens + ' 币' : ''}`
+        + (anyLive ? '' : '（four_watch.mjs / gang_watch.mjs）');
+      pills = `<span class="pill ${F.live ? (fst.armed ? 'arm' : 'dry') : 'off'}">four ${F.live ? (fst.armed ? '实盘' : '模拟') : '离线'}</span>`
+        + `<span class="pill ${G.live ? 'dry' : 'off'}">gang ${G.live ? '模拟' : '离线'}</span>`;
+      stats = [
+        ['four 预算', (fst.budgetBnb ?? '—') + ' BNB', 'gold'],
+        ['four 区块', fst.head ? fst.head.toLocaleString() : '—', ''],
+        ['four 已买', fst.bought ?? 0, ''],
+        ['four 跳过', fst.skipped ?? 0, ''],
+        ['gang 盯市', gst.tokens ?? '—', 'gold'],
+        ['gang 事件', gst.events ?? 0, ''],
+        ['WSS·four', (fst.wss ?? 0) + ' 路', ''],
+        ['心跳', hb(fst.ts) + ' / ' + hb(gst.ts), ''],
+      ];
+    }
+    $('monSub').textContent = sub;
+    $('monPills').innerHTML = pills;
     $('monStats').innerHTML = stats.map(([k, v, c]) => `<div class="c"><div class="k">${k}</div><div class="v ${c}">${v}</div></div>`).join('');
     const rec = $('monRecent');
-    if (rec) rec.innerHTML = snipe && (st.recent || []).length
-      ? st.recent.map(h => `<div class="li"><div><div class="pair-l">${h.sym} 底池 · ${h.result}</div><div class="meta mono">${short(h.token)}${h.reason ? ' · ' + h.reason : ''}</div></div>`
+    if (rec) rec.innerHTML = snipe && (sst.recent || []).length
+      ? sst.recent.map(h => `<div class="li"><div><div class="pair-l">${h.sym} 底池 · ${h.result}</div><div class="meta mono">${short(h.token)}${h.reason ? ' · ' + h.reason : ''}</div></div>`
         + (h.tx && h.tx.startsWith('0x') ? `<a class="copyca hashlink" href="https://bscscan.com/tx/${h.tx}" target="_blank" rel="noopener">Tx ↗</a>` : '') + `</div>`).join('')
       : (snipe ? '<div class="empty">还没有命中股票底池的新币</div>' : '');
   } catch {
@@ -567,6 +675,7 @@ function bootstrap() {
   });
   $('pickerInput').addEventListener('input', e => renderPickerList(e.target.value.trim()));
   $('picker').addEventListener('click', e => { if (e.target === $('picker')) $('picker').close(); });
+  $('xferToken')?.addEventListener('change', xferShowBalance);
   loadWallet(); loadHistory(); loadStatus(); loadAlerts(); loadBnbPrice();
   setInterval(loadBnbPrice, 30000);
   setInterval(loadStatus, 6000);

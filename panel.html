@@ -42,6 +42,44 @@ body{margin:0;min-height:100vh;color:var(--ink);
 body::before{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.03;
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");}
 .mono{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-variant-numeric:tabular-nums}
+
+/* ---- fund / deposit (inline in wallet card) ---- */
+.fund-row{display:flex;gap:14px;align-items:center;margin:2px 0 0}
+.fund-qr{flex:0 0 auto;padding:9px;background:#fff;border-radius:12px;box-shadow:0 0 0 1px var(--gold-line);line-height:0}
+.fund-qr svg{width:128px;height:128px;display:block}
+.fund-info{min-width:0;flex:1}
+.fund-label{font-size:10.5px;font-weight:800;letter-spacing:.07em;color:var(--gold-deep);margin:0 0 6px}
+.fund-info .addr{font-size:11.5px;word-break:break-all;color:var(--ink);margin:0 0 10px;line-height:1.5}
+.fund-copy{border:1px solid var(--gold-line);background:var(--gold-soft);color:var(--gold-deep);border-radius:9px;padding:7px 16px;font:inherit;font-size:12.5px;font-weight:700;cursor:pointer;transition:.15s}
+.fund-copy:hover{background:var(--gold);color:#fff}
+.fund-copy.ok{background:#2e7d5e33;color:#2e7d5e;border-color:#2e7d5e66}
+.fund-note{font-size:11px;color:var(--muted);line-height:1.6;margin:10px 0 14px}
+
+/* ---- transfer out ---- */
+.xfer-grid{display:grid;gap:9px}
+.xfer-grid select{font:inherit;font-size:13px;padding:8px 10px;border:1px solid var(--line);border-radius:9px;background:var(--surface-2);color:var(--ink)}
+.xfer-grid .amt-wrap{display:flex;gap:6px;align-items:center}
+.xfer-max{flex:0 0 auto;border:1px solid var(--gold-line);background:var(--gold-soft);color:var(--gold-deep);border-radius:8px;padding:8px 10px;font-size:12px;font-weight:700;cursor:pointer}
+.xfer-max:hover{background:var(--gold);color:#fff}
+.xfer-grid .amt{flex:1}
+.xfer-grid .mono{width:100%;box-sizing:border-box}
+.xfer-balance{font-size:11.5px;color:var(--muted)}
+.gold-btn{border:1px solid var(--gold-line);background:var(--gold);color:#fff;border-radius:9px;padding:9px;font:inherit;font-weight:700;cursor:pointer;transition:.15s}
+.gold-btn:hover{background:var(--gold-deep)}
+.gold-btn:disabled{opacity:.55;cursor:wait}
+.xfer-out{font-size:12px;color:var(--muted);margin:0;word-break:break-all;line-height:1.6}
+.xfer-out a{color:var(--gold-deep)}
+.xfer-out.err{color:#b3403a}
+
+/* ---- inline transfer confirm ---- */
+.xfer-confirm{border:1px solid var(--gold-line);background:var(--gold-soft);border-radius:12px;padding:12px 14px}
+.xc-title{margin:0 0 10px;font-size:11px;font-weight:800;letter-spacing:.05em;color:var(--gold-deep)}
+.xfer-confirm-rows{display:grid;gap:8px;margin:0 0 12px}
+.xfer-confirm-rows .row{display:flex;justify-content:space-between;gap:12px;font-size:12.5px;align-items:baseline}
+.xfer-confirm-rows .k{color:var(--muted);flex:0 0 auto}
+.xfer-confirm-rows .v{text-align:right;word-break:break-all;font-weight:600}
+.xfer-confirm-rows .v.mono{font-weight:500}
+.modal-actions{display:flex;gap:8px;justify-content:flex-end}
 .tnum{font-variant-numeric:tabular-nums}
 
 header{position:sticky;top:0;z-index:20;height:62px;display:flex;align-items:center;gap:18px;
@@ -182,6 +220,8 @@ main{position:relative;z-index:1;max-width:1180px;margin:0 auto;padding:clamp(20
 .st-FINISHED,.st-BOUGHT{background:oklch(94% .05 150);color:var(--up)}
 .st-PENDING,.st-10x{background:var(--gold-soft);color:var(--gold-deep)}
 .st-FAILED{background:oklch(94% .06 25);color:var(--down)}
+.st-FOUR{background:oklch(94% .05 259);color:oklch(48% .13 259)}
+.st-GANG{background:oklch(94% .05 150);color:oklch(45% .12 150)}
 .li a{color:var(--gold-deep);text-decoration:none;font-size:11px}.li a:hover{text-decoration:underline}
 .copyca{border:1px solid var(--line);background:var(--surface-2);color:var(--muted);border-radius:7px;padding:5px 9px;font:inherit;font-size:11px;font-weight:650;cursor:pointer;white-space:nowrap;transition:.15s}
 .copyca:hover{border-color:var(--gold-line);color:var(--gold-deep);background:var(--gold-soft)}
@@ -340,8 +380,36 @@ dialog::backdrop{background:oklch(40% .03 70/.3);backdrop-filter:blur(3px)}
       <div class="col">
         <section class="card pad">
           <div class="hd"><h2>钱包余额</h2><button class="ghost" onclick="loadWallet()">刷新</button></div>
-          <p class="addr mono" id="walletAddr" style="margin:0 0 14px">读取中…</p>
+          <div class="fund-row">
+            <div class="fund-qr" id="fundQr" title="扫码充值 · BSC">…</div>
+            <div class="fund-info">
+              <p class="fund-label">充值地址 · BSC(BEP-20)</p>
+              <p class="addr mono" id="fundAddr">读取中…</p>
+              <button class="fund-copy" onclick="copyFundAddr(this)">复制地址</button>
+            </div>
+          </div>
+          <p class="fund-note">交易所提币请选 <b>BEP20(BSC)</b> 网络,选错网络资产不可找回</p>
           <div class="list" id="balList"></div>
+        </section>
+        <section class="card pad">
+          <div class="hd"><h2>转出</h2><span class="xfer-balance" id="xferBal"></span></div>
+          <div class="xfer-grid">
+            <select id="xferToken"></select>
+            <div class="amt-wrap"><input class="amt" id="xferAmt" placeholder="0.0" inputmode="decimal" autocomplete="off"><button class="xfer-max" onclick="xferFillMax()" type="button">全部</button></div>
+            <input class="mono" id="xferTo" placeholder="接收地址 0x…(需在 Binance App 地址簿中)" autocomplete="off" spellcheck="false">
+            <button class="gold-btn" id="xferGo" onclick="confirmXfer()">转出</button>
+            <div class="xfer-confirm" id="xferConfirm" hidden>
+              <p class="xc-title">核对后确认 · 广播后不可撤销</p>
+              <div class="xfer-confirm-rows">
+                <div class="row"><span class="k">代币</span><span class="v" id="xcToken">—</span></div>
+                <div class="row"><span class="k">数量</span><span class="v" id="xcAmt">—</span></div>
+                <div class="row"><span class="k">接收地址</span><span class="v mono" id="xcTo">—</span></div>
+                <div class="row"><span class="k">网络</span><span class="v">BNB Smart Chain(BEP-20)</span></div>
+              </div>
+              <div class="modal-actions"><button class="ghost" onclick="closeXfer()">取消</button><button class="gold-btn" id="xcGo" onclick="doXfer()">确认转出</button></div>
+            </div>
+            <p class="xfer-out" id="xferOut"></p>
+          </div>
         </section>
         <section class="card pad">
           <div class="hd"><h2>最近兑换</h2><button class="ghost" onclick="loadHistory()">刷新</button></div>
@@ -411,6 +479,7 @@ dialog::backdrop{background:oklch(40% .03 70/.3);backdrop-filter:blur(3px)}
   <div class="dlg-body" id="pickerList"></div>
 </dialog>
 
+<script src="/qrcode.js"></script>
 <script src="/panel.js"></script>
 <script>bootstrap();</script>
 </body>

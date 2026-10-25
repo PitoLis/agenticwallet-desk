@@ -280,8 +280,8 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 return self.send({'success': False, 'error': {'message': str(e)}}, 502)
         if path == '/status':
-            # Prefer the stock-pool sniper (it may run on a separate wallet); fall
-            # back to the original four_watch monitor. Live = heartbeat within 20s.
+            # Multi-source monitors: four_watch, gang_watch, and the stock-pool
+            # sniper (which may run on a separate wallet). Live = heartbeat < 20s.
             now_ms = __import__('time').time() * 1000
             def _read(name):
                 fp = Path.home() / '.config' / name
@@ -289,26 +289,34 @@ class Handler(BaseHTTPRequestHandler):
                     return json.loads(fp.read_text()) if fp.exists() else None
                 except Exception:
                     return None
-            sn, fw = _read('stock-snipe-status.json'), _read('four-watch-status.json')
-            sn_live = bool(sn and now_ms - sn.get('ts', 0) < 20000)
-            fw_live = bool(fw and now_ms - fw.get('ts', 0) < 20000)
-            if sn and (sn_live or not fw_live):
-                return self.send({'success': True, 'data': {'live': sn_live, 'kind': 'stock_snipe', 'status': sn}})
-            return self.send({'success': True, 'data': {'live': fw_live, 'kind': 'four_watch', 'status': fw}})
+            out = {}
+            for key, fname, kind in (('four', 'four-watch-status.json', 'four_watch'),
+                                     ('gang', 'gang-watch-status.json', 'gang_watch'),
+                                     ('snipe', 'stock-snipe-status.json', 'stock_snipe')):
+                st = _read(fname)
+                live = bool(st and now_ms - st.get('ts', 0) < 20000)
+                out[key] = {'live': live, 'kind': kind, 'status': st}
+            return self.send({'success': True, 'data': out})
         if path == '/events':
-            ep = Path.home() / '.config/four-watch-events.json'
-            try:
-                data = json.loads(ep.read_text()) if ep.exists() else []
-            except Exception:
-                data = []
-            return self.send({'success': True, 'data': data})
+            merged = []
+            for src in ('four-watch-events.json', 'gang-watch-events.json'):
+                ep = Path.home() / '.config' / src
+                try:
+                    data = json.loads(ep.read_text()) if ep.exists() else []
+                except Exception:
+                    data = []
+                for e in data:
+                    e.setdefault('source', 'four' if src.startswith('four') else 'gang')
+                merged.extend(data)
+            merged.sort(key=lambda e: e.get('ts', 0), reverse=True)
+            return self.send({'success': True, 'data': merged[:120]})
         if path == '/tokeninfo':
             token = query.get('token', [''])[0]
             if not valid_token(token):
                 return self.send({'success': False, 'error': {'message': 'Invalid token address'}}, 400)
             return self.send(token_info(token))
-        if path == '/panel.js':
-            b = Path(__file__).with_name('panel.js').read_bytes()
+        if path in ('/panel.js', '/qrcode.js'):
+            b = Path(__file__).with_name(path.lstrip('/')).read_bytes()
             self.send_response(200)
             self.send_header('content-type', 'text/javascript; charset=utf-8')
             self.send_header('content-length', str(len(b)))
@@ -381,17 +389,24 @@ class Handler(BaseHTTPRequestHandler):
                 if rt and rt.get('success') and rt['data'].get('venue') == 'direct':
                     slip = '10' if sl == 'auto' else str(sl)
                     amt = 'all' if (side == 'sell' and d.get('all')) else qty
+                    platform = (rt['data'] or {}).get('platform')
                     if self.path == '/quote':
                         q = run_node('routes.mjs', 'quote', curve_token, side, amt, timeout=40)
-                        if not q.get('success'):
+                        msg = str((q.get('error') or {}).get('message') or '') if not q.get('success') else ''
+                        # AlreadyGraduated(): the token left the curve after detect() ran —
+                        # it now trades on DEX, so fall through to the aggregator below.
+                        # flapagent excluded: graduation there means claim, not DEX liquidity.
+                        grad_now = 'AlreadyGraduated' in msg or '0xe6a0d45f' in msg.lower()
+                        if not q.get('success') and not (grad_now and platform != 'flapagent'):
                             return self.send(q)
-                        x = q['data']
-                        sym_in = 'BNB' if side == 'buy' else (x.get('symbol') or d.get('fromSymbol') or 'TOKEN')
-                        sym_out = (x.get('symbol') or d.get('toSymbol') or 'TOKEN') if side == 'buy' else 'BNB'
-                        return self.send({'success': True, 'data': {
-                            'fromCoinSymbol': sym_in, 'fromCoinAmount': qty,
-                            'toCoinSymbol': sym_out, 'toCoinAmount': x.get('outHuman', '0'),
-                            'slippage': float(slip) / 100, 'route': x.get('route'), 'note': x.get('note', ''), 'venue': 'direct'}})
+                        if q.get('success'):
+                            x = q['data']
+                            sym_in = 'BNB' if side == 'buy' else (x.get('symbol') or d.get('fromSymbol') or 'TOKEN')
+                            sym_out = (x.get('symbol') or d.get('toSymbol') or 'TOKEN') if side == 'buy' else 'BNB'
+                            return self.send({'success': True, 'data': {
+                                'fromCoinSymbol': sym_in, 'fromCoinAmount': qty,
+                                'toCoinSymbol': sym_out, 'toCoinAmount': x.get('outHuman', '0'),
+                                'slippage': float(slip) / 100, 'route': x.get('route'), 'note': x.get('note', ''), 'venue': 'direct'}})
                     t = run_node('routes.mjs', 'trade', curve_token, side, amt, slip, timeout=150)
                     if t.get('success') and side == 'buy':
                         # Approve the new holding for selling now, so the sell later is one tx.
@@ -415,6 +430,35 @@ class Handler(BaseHTTPRequestHandler):
                     gas = 'HIGH'
                 args += ['--mev', 'true', '--gasLevel', gas]
             return self.send(run_baw(args))
+
+        if self.path == '/transfer':
+            token = resolve_token(d.get('token'))
+            recipient = (d.get('recipient') or '').strip()
+            if not valid_token(token):
+                return self.send({'success': False, 'error': {'message': '请提供有效的代币地址'}}, 400)
+            if not re.fullmatch(r'0x[0-9a-fA-F]{40}', recipient):
+                return self.send({'success': False, 'error': {'message': '请提供有效的接收地址(0x + 40 位十六进制)'}}, 400)
+            use_max = bool(d.get('max'))
+            amt = (d.get('amount') or '').strip()
+            args = ['wallet', 'send', '--recipient', recipient,
+                    '--binanceChainId', CHAIN, '--tokenAddress', token]
+            if use_max:
+                args.append('--max')
+            else:
+                try:
+                    a = Decimal(amt)
+                    if not a.is_finite() or a <= 0:
+                        raise ValueError()
+                except (InvalidOperation, ValueError, TypeError):
+                    return self.send({'success': False, 'error': {'message': '请输入正数数量'}}, 400)
+                args += ['--amount', amt]
+            r = run_baw(args, timeout=120)
+            if r.get('success'):
+                tx = ((r.get('data') or {}).get('txHash'))
+                r.setdefault('data', {})['explorer'] = f'https://bscscan.com/tx/{tx}' if tx else None
+                # broadcast != confirmed: caller must poll tx-history.
+                r['data']['pending'] = True
+            return self.send(r)
 
         self.send({'success': False, 'error': {'message': 'Unknown endpoint'}}, 404)
 
