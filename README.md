@@ -58,6 +58,7 @@ four_watch.mjs  (独立后台进程)
 | `token_meta.mjs` | 任意代币的链上 name/symbol/decimals/balance + 钱包余额 |
 | `openfour_check.mjs` | Four.meme V12 模板只读核查（注册/preset/NFT/能否买模拟） |
 | `four_watch.mjs` | 抢购监控 + 自动买入 + 10 倍提醒 + 状态/事件落盘 |
+| `AGENT钱包工作台prompt.txt` | 复刻用的完整提示词，丢给 AI 即可从零做出同款面板 |
 | `routes.mjs` | 平台识别 + 曲线直调（AgentPad/Gang/MOAT/Flap Agent/UNITS）买卖适配 |
 
 ---
@@ -68,7 +69,8 @@ four_watch.mjs  (独立后台进程)
 
 | 平台 | 识别方式 | 路由 | 说明 |
 |---|---|---|---|
-| four.meme（含 V12 / Agent 专属测试版） | 尾号 `4444` / `ffff` | Binance 聚合（baw） | Agent 专属模板需 Agent ID NFT + 模板白名单 |
+| four.meme 普通内盘 / 外盘 | 尾号 `4444` / `ffff` | Binance 聚合（baw） | |
+| four.meme Agent 专属（OpenFour V12） | 在 OpenFourCore 登记的币 | 内盘曲线直调，毕业后走聚合 | `buyByBudget` 付 BNB / `sell`（卖出前按本次数量单独授权）；需 Agent ID NFT，测试阶段还要求模板白名单 |
 | Flap（flap.sh） | 尾号 `7777` / `8888` | Binance 聚合（baw） | |
 | 外盘（PancakeSwap） | 其余已上 DEX 的币 | Binance 聚合（baw） | |
 | AgentPad（agentpad.trade） | 各 Factory `isToken(ca)` | 曲线直调 | `buyWithBNBMinOut` / `sellWithMin`，需 Agent ID |

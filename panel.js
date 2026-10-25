@@ -26,7 +26,7 @@ const DEFAULT_TOKENS = [
 const KNOWN = {};
 for (const t of DEFAULT_TOKENS) KNOWN[t.address.toLowerCase()] = {decimals: 18, ...t, symbolShort: t.symbol};
 const PLATFORM_NAMES = {
-  fourmeme: 'four.meme', flap: 'Flap', flapagent: 'Flap Agent', agentpad: 'AgentPad', gang: 'Gang',
+  fourmeme: 'four.meme', fouragent: 'four.meme Agent 专属', flap: 'Flap', flapagent: 'Flap Agent', agentpad: 'AgentPad', gang: 'Gang',
   gangpair: 'Gang Pair', cycpad: 'Cycpad', moat: 'MOAT', units: 'UNITS', pancake: '外盘 PancakeSwap',
 };
 const PAIRS = [['USDT', 'BNB', 'USDT → BNB'], ['BNB', 'USDT', 'BNB → USDT']];

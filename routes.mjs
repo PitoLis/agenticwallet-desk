@@ -26,6 +26,7 @@ export const PLATFORMS = {
   gangpair: {name: 'Gang Pair', site: 'gang.fun', pad: '0x1B8F3f69DFa0a7F63d308C7EB0Fd38D8b099966E'},
   moat: {name: 'MOAT', site: 'moat.fun', pad: '0xa954c7cf3aac9b31138cc2137a86ec2b28ab4729', fairSlot: '0x873e8ff7eba0863b2c4fc615b3c0cb33752f472e'},
   flapagent: {name: 'Flap Agent 曲线', site: 'flap.sh', factory: '0xC55820f24015bE7c4f18949D9e1363A3609B300e', portal: '0x49387D2E6cbF8FefE856e3FBc3E98a01aC3af062'},
+  fouragent: {name: 'four.meme Agent', site: 'four.meme', core: '0xebe7b6c1089d9f72ad07f34e36d898e44e5e27f3', tools: '0x97da82f56fef1a0b974587a48135fa9da2a4e905'},
   cycpad: {name: 'Cycpad', site: 'cycpad.fun', factory: '0x0ff93d38e6975800A42B0693b58009DFAE061f26'},
   units: {name: 'UNITS', site: 'units-agentic.fun', token: '0xcD5F5cc018cE0650Bb4957A2853d24b4b4072A1D', curve: '0xd254D781363ba9e96A7B1dc39BabC5f735762682'},
 };
@@ -64,10 +65,19 @@ async function baw(args) {
   }
 }
 let WALLET = null;
+// Read-only quotes only need *an* address; remember the last signed-in wallet so
+// quotes still work while baw is signed out. Trades still go through baw, which
+// refuses when signed out.
+import {readFileSync as _rf, writeFileSync as _wf} from 'node:fs';
+import {homedir as _hd} from 'node:os';
+const WALLET_CACHE = _hd() + '/.config/agent-desk-wallet.json';
 async function wallet() {
   if (WALLET) return WALLET;
   const w = await baw(['wallet', 'address']);
-  WALLET = w.data.addresses.find(x => x.binanceChainId === '56').address;
+  const a = w?.data?.addresses?.find(x => x.binanceChainId === '56')?.address;
+  if (a) { WALLET = a; try { _wf(WALLET_CACHE, JSON.stringify({address: a})); } catch {} return WALLET; }
+  try { WALLET = JSON.parse(_rf(WALLET_CACHE, 'utf8')).address; } catch {}
+  if (!WALLET) throw new Error('baw 钱包未登录，请先重新扫码登录');
   return WALLET;
 }
 const deadline = () => BigInt(Math.floor(Date.now() / 1000) + 600);
@@ -77,10 +87,24 @@ const balanceOf = async (token, who) => BigInt((await tryCall(token, enc('balanc
 
 // ---- detection ----
 // Returns {platform, venue:'baw'|'direct', ...route-specific fields}.
+const tail4 = a => a.slice(-4).toLowerCase();
 export async function detect(ca) {
   ca = ca.toLowerCase();
   const P = PLATFORMS;
   if (ca === P.units.token.toLowerCase()) return {platform: 'units', venue: 'direct', ...P.units};
+
+  // four.meme V12 (OpenFour): registered on OpenFourCore. On the curve the baw
+  // aggregator can't fill it, so trade through Core; once graduated, baw/PancakeSwap.
+  if (tail4(ca) === 'ffff' || tail4(ca) === '4444') {
+    const w = words(await tryCall(P.fouragent.core, enc('tokens(address)', ca)));
+    if (w.length > 20 && toAddr(w[3]).toLowerCase() === ca) {
+      const preset = BigInt('0x' + w[2]).toString();
+      const vault = toAddr(w[10]);
+      const left = BigInt((await tryCall(ca, enc('balanceOf(address)', vault))) || '0x0');
+      const graduated = left === 0n;
+      return {platform: 'fouragent', venue: graduated ? 'baw' : 'direct', preset, graduated, core: P.fouragent.core, tools: P.fouragent.tools};
+    }
+  }
 
   // Cycpad: token is its own curve; factory.isToken(ca). Graduated → PancakeSwap via baw.
   if (ca.endsWith('cccc')) {
@@ -145,6 +169,11 @@ export async function quote(ca, side, amount) {
     if (r.platform === 'agentpad') out = BigInt('0x' + words(await call(ca, enc('quoteBuy(uint256)', inAmt)))[0]);
     else if (r.platform === 'gang' || r.platform === 'moat') out = BigInt('0x' + words(await call(r.pad, enc('quoteBuy(address,address,uint256)', ca, me, inAmt)))[0]);
     else if (r.platform === 'units') out = BigInt('0x' + words(await call(r.curve, enc('quoteBuy(address,uint256)', me, inAmt)))[0]);
+    else if (r.platform === 'fouragent') {
+      const w = words(await call(r.tools, enc('estimateBuyByBudget(address,address,uint256,uint256,bytes)', ca, me, inAmt, 0n, 160n, 0n)));
+      out = BigInt('0x' + (w[4] || '0'));
+      if (out === 0n) throw new Error('当前钱包不能买这个币（Agent ID 专属模板要求持有 Agent ID NFT 且在模板白名单里）');
+    }
     else if (r.platform === 'cycpad') {
       if (!r.bnbQuote) throw new Error('该 Cycpad 代币以 USDT 计价，暂只支持 BNB 计价的内盘');
       const can = await tryCall(ca, enc('canBuy(address)', me));
@@ -165,7 +194,10 @@ export async function quote(ca, side, amount) {
       : await balanceOf(r.platform === 'units' ? r.token : ca, me);
     inAmt = amount === 'all' ? bal : toWei(amount);
     if (inAmt > bal) throw new Error('卖出数量超过持仓');
-    if (r.platform === 'agentpad' || r.platform === 'cycpad') out = BigInt('0x' + (words(await call(ca, enc('quoteSell(uint256)', inAmt), me))[0] || '0'));
+    if (r.platform === 'fouragent') {
+      const w = words(await call(r.tools, enc('estimateSell(address,address,uint256,uint256,bytes)', ca, me, inAmt, 0n, 160n, 0n)));
+      out = BigInt('0x' + (w[3] || '0'));
+    } else if (r.platform === 'agentpad' || r.platform === 'cycpad') out = BigInt('0x' + (words(await call(ca, enc('quoteSell(uint256)', inAmt), me))[0] || '0'));
     else if (r.platform === 'gang' || r.platform === 'moat') {
       const q = await tryCall(r.pad, enc('quoteSell(address,address,uint256)', ca, me, inAmt));
       out = q ? BigInt('0x' + words(q)[0]) : 0n;
@@ -208,10 +240,11 @@ export async function curveInfo(ca) {
     if (r.platform === 'gang' || r.platform === 'moat') { w = words(await tryCall(r.pad, enc('quoteBuy(address,address,uint256)', ca, me, amt))); net = w[1]; fee = w[2]; }
     else if (r.platform === 'agentpad') { w = words(await tryCall(ca, enc('quoteBuy(uint256)', amt))); net = w[1]; fee = w[2]; }
     else if (r.platform === 'units') { w = words(await tryCall(r.curve, enc('quoteBuy(address,uint256)', me, amt))); net = w[1]; fee = w[2]; }
+    else if (r.platform === 'fouragent') { w = words(await tryCall(r.tools, enc('estimateBuyByBudget(address,address,uint256,uint256,bytes)', ca, me, amt, 0n, 160n, 0n))); net = w[0]; fee = w[1]; }
     else if (r.platform === 'flapagent') { w = words(await tryCall(r.portal, enc('quoteBuy(address,address,uint256)', r.market, me, amt))); net = w[0]; fee = w[1]; }
     if (net && fee) {
       const n = Number(BigInt('0x' + net)), f = Number(BigInt('0x' + fee));
-      if (n + f > 0) buyTax = f / (r.platform === 'flapagent' ? n : n + f);
+      if (n + f > 0) buyTax = f / (r.platform === 'flapagent' || r.platform === 'fouragent' ? n : n + f);
       // Fork-measured round trips (Gang/MOAT/AgentPad) show the sell fee equals the buy fee.
       sellTax = buyTax;
     }
@@ -248,15 +281,21 @@ export async function trade(ca, side, amount, slippagePct = 10) {
   if (q.venue === 'baw') return {ok: false, venue: 'baw', route: q.route, error: 'use baw market-order for this token'};
   const r = q.route, inAmt = BigInt(q.in), out = BigInt(q.out);
   const minOut = out * BigInt(Math.max(0, Math.round((100 - Number(slippagePct)) * 100))) / 10000n;
-  if (r.platform === 'cycpad' && minOut === 0n) return {ok: false, route: r, error: '报价为 0，无法设置最小到账（可能已毕业或卖出数量过小）'};
+  if ((r.platform === 'cycpad' || r.platform === 'fouragent') && minOut === 0n) return {ok: false, route: r, error: '报价为 0，无法设置最小到账（可能已毕业或卖出数量过小）'};
   if (side === 'buy') {
     if (r.platform === 'agentpad') return {route: r, ...(await bawCall(ca, enc('buyWithBNBMinOut(uint256)', minOut), inAmt))};
     if (r.platform === 'gang' || r.platform === 'moat') return {route: r, ...(await bawCall(r.pad, enc('buy(address,uint256)', ca, minOut), inAmt))};
     if (r.platform === 'units') return {route: r, ...(await bawCall(r.curve, enc('buy(uint256)', minOut), inAmt))};
+    if (r.platform === 'fouragent') return {route: r, ...(await bawCall(r.core, enc('buyByBudget(address,uint256,uint256,uint256,bytes)', ca, inAmt, minOut, 0n, 160n, 0n), inAmt))};
     if (r.platform === 'cycpad') return {route: r, ...(await bawCall(ca, enc('buyWithQuote(uint256,uint256,uint256)', inAmt, minOut, deadline()), inAmt))};
     if (r.platform === 'flapagent') return {route: r, ...(await bawCall(r.portal, enc('buy(address,uint256)', r.market, minOut), inAmt))};
   } else {
     if (r.platform === 'agentpad') return {route: r, ...(await bawCall(ca, enc('sellWithMin(uint256,uint256)', inAmt, minOut), 0))};
+    if (r.platform === 'fouragent') {
+      const ap = await ensureAllowance(ca, r.core, inAmt);
+      if (!ap.ok) return {route: r, ok: false, stage: 'approve', error: ap.error};
+      return {route: r, ...(await bawCall(r.core, enc('sell(address,uint256,uint256,uint256,bytes)', ca, inAmt, minOut, 0n, 160n, 0n), 0))};
+    }
     if (r.platform === 'cycpad') return {route: r, ...(await bawCall(ca, enc('sell(uint256,uint256,uint256)', inAmt, minOut, deadline()), 0))}; // no approval needed
     if (r.platform === 'flapagent') {
       const all = inAmt.toString() === r.holding;
