@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 'use strict';
-// stock_snipe.mjs — snipe the first N four.meme (OpenFour) tokens whose bonding
-// curve is quoted in a stock token (BNC4 / NVDAB / BNCB / SPCXB / SKHYB).
+// stock_snipe.mjs — snipe the first N four.meme Binance Agent ID Exclusive tokens
+// (preset 1778027615735) whose bonding curve is quoted in a stock token
+// (BNC4 / NVDAB / BNCB / SPCXB / SKHYB).
 //
 // Flow per hit:  BNB --baw market-order--> stock token --approve exact--> OpenFourCore.buyByBudget
 // Every on-chain step goes through baw (preview -> execute); keys never leave the wallet.
@@ -24,6 +25,9 @@ const CORE = '0xebe7b6c1089d9f72ad07f34e36d898e44e5e27f3';
 const TOOLS = '0x97da82f56fef1a0b974587a48135fa9da2a4e905';
 const BNB = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
 const TC_TOPIC = '0x7dae4dcd1b20eb0445e7cc1d02b3e2e7f32fa63081a0e764732c269f2b8f228f';
+// Only the Binance Agent ID Exclusive template (needs an Agent ID NFT to trade).
+const PRESET = BigInt(process.env.SNIPE_PRESET || '1778027615735');
+const PRESET_TOPIC = '0x' + PRESET.toString(16).padStart(64, '0');
 const STOCKS = {
   '0x7c8d5502b544ddaf8852fc46d1174e34876d545c': 'BNC4',
   '0x02fca66c1d1afb4e2a7884261eb00f63598a7436': 'NVDAB',
@@ -189,7 +193,7 @@ async function scanTo(head) {
   if (head <= lastScanned) return;
   const from = lastScanned + 1;
   try {
-    const logs = await rpc('eth_getLogs', [{address: CORE, topics: [TC_TOPIC], fromBlock: '0x' + from.toString(16), toBlock: '0x' + head.toString(16)}]);
+    const logs = await rpc('eth_getLogs', [{address: CORE, topics: [TC_TOPIC, PRESET_TOPIC], fromBlock: '0x' + from.toString(16), toBlock: '0x' + head.toString(16)}]);
     lastScanned = head; status.head = head;
     logs.sort((a, b) => parseInt(a.blockNumber, 16) - parseInt(b.blockNumber, 16) || parseInt(a.logIndex, 16) - parseInt(b.logIndex, 16));
     await handle(logs);
@@ -212,7 +216,7 @@ async function main() {
   WALLET = w?.data?.addresses?.find(x => x.binanceChainId === '56')?.address;
   if (!WALLET) throw new Error('baw 钱包未登录');
   const head = parseInt(await rpc('eth_blockNumber', []), 16); lastScanned = head;
-  log(`stock_snipe start · ${CFG.armed ? '实盘' : '模拟'} · 每个 ${CFG.budgetBnb} BNB · 最多 ${CFG.max} 个 · 股票: ${Object.values(STOCKS).join('/')} · head ${head}`);
+  log(`stock_snipe start · ${CFG.armed ? '实盘' : '模拟'} · 模板 ${PRESET} · 每个 ${CFG.budgetBnb} BNB · 最多 ${CFG.max} 个 · 股票: ${Object.values(STOCKS).join('/')} · head ${head}`);
   for (const u of CFG.wss) startWss(u.trim());
   writeStatus();
   for (;;) {
@@ -229,7 +233,7 @@ if (process.argv[2] === 'replay') {
     CFG.armed = false; CFG.statePath = '/tmp/stock-snipe-replay.json';
     const [f, t] = process.argv.slice(3).map(Number);
     for (let b = f; b <= t; b += 5000) {
-      const logs = await rpc('eth_getLogs', [{address: CORE, topics: [TC_TOPIC], fromBlock: '0x' + b.toString(16), toBlock: '0x' + Math.min(b + 4999, t).toString(16)}]);
+      const logs = await rpc('eth_getLogs', [{address: CORE, topics: [TC_TOPIC, PRESET_TOPIC], fromBlock: '0x' + b.toString(16), toBlock: '0x' + Math.min(b + 4999, t).toString(16)}]);
       await handle(logs);
     }
     process.exit(0);
