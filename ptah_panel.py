@@ -336,8 +336,19 @@ class Handler(BaseHTTPRequestHandler):
 
     # ---- POST ----
     def do_POST(self):
-        if self.headers.get('Origin') not in (None, 'http://127.0.0.1:8787', 'http://localhost:8787'):
-            return self.send({'success': False, 'error': {'message': 'Origin rejected'}}, 403)
+        # CSRF guard: allow no-origin tools (curl) and same-origin browsers
+        # (origin host must equal the request Host — covers LAN access like
+        # http://192.168.x.x:8787 when the panel binds 0.0.0.0 via PANEL_HOST).
+        origin = self.headers.get('Origin')
+        if origin is not None:
+            ok = origin in ('http://127.0.0.1:8787', 'http://localhost:8787')
+            if not ok:
+                try:
+                    ok = urlparse(origin).netloc == (self.headers.get('Host') or '')
+                except Exception:
+                    ok = False
+            if not ok:
+                return self.send({'success': False, 'error': {'message': 'Origin rejected'}}, 403)
         if self.headers.get('Content-Type', '').split(';')[0] != 'application/json':
             return self.send({'success': False}, 415)
         n = int(self.headers.get('content-length', '0'))
@@ -464,5 +475,8 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == '__main__':
-    print('Open http://127.0.0.1:8787')
-    ThreadingHTTPServer(('127.0.0.1', 8787), Handler).serve_forever()
+    # PANEL_HOST=0.0.0.0 opens the panel to the LAN (e.g. phones on the same
+    # Wi-Fi). Default stays loopback-only.
+    host = os.environ.get('PANEL_HOST', '127.0.0.1')
+    print(f'Open http://127.0.0.1:8787' + ('  (LAN: 0.0.0.0 — reachable from your phone on the same network)' if host == '0.0.0.0' else ''))
+    ThreadingHTTPServer((host, 8787), Handler).serve_forever()
