@@ -15,7 +15,7 @@ Endpoints
   POST /swap             {fromToken,toToken,qty,slippage,gasLevel}
   POST /four/preflight   {token}  read-only template & whitelist check
 """
-import json, os, re, subprocess
+import json, os, re, subprocess, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 from pathlib import Path
@@ -233,6 +233,9 @@ def valid_token(t):
     return bool(ADDR.fullmatch(t))
 
 
+_GP_CACHE = {'ts': 0.0, 'data': None}  # /gang-progress subprocess cache
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
@@ -310,6 +313,22 @@ class Handler(BaseHTTPRequestHandler):
                 merged.extend(data)
             merged.sort(key=lambda e: e.get('ts', 0), reverse=True)
             return self.send({'success': True, 'data': merged[:120]})
+        if path == '/gang-progress':
+            # Live graduation progress via `gang near-grad` (subprocess, cached
+            # ~30s so several browser tabs / phone + desktop don't re-spawn it).
+            global _GP_CACHE
+            now = time.time()
+            if _GP_CACHE['data'] is None or now - _GP_CACHE['ts'] > 30:
+                try:
+                    p = subprocess.run(['gang', 'near-grad', '--min-pct', '3', '--limit', '10'],
+                                       capture_output=True, text=True, timeout=30, env=_env())
+                    txt = p.stdout.strip()
+                    d = json.loads(txt[txt.find('{'):txt.rfind('}') + 1])
+                    _GP_CACHE = {'ts': now, 'data': d.get('tokens') or []}
+                except Exception as e:
+                    if _GP_CACHE['data'] is None:
+                        return self.send({'success': False, 'error': {'message': f'near-grad failed: {e}'}}, 502)
+            return self.send({'success': True, 'data': {'tokens': _GP_CACHE['data'], 'age': _GP_CACHE['ts']}})
         if path == '/tokeninfo':
             token = query.get('token', [''])[0]
             if not valid_token(token):

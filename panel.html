@@ -80,6 +80,17 @@ body::before{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;opa
 .xfer-confirm-rows .v{text-align:right;word-break:break-all;font-weight:600}
 .xfer-confirm-rows .v.mono{font-weight:500}
 .modal-actions{display:flex;gap:8px;justify-content:flex-end}
+
+/* ---- gang graduation progress ---- */
+.gp-item{padding:9px 0;border-bottom:1px solid var(--line-2)}
+.gp-item:last-child{border-bottom:none}
+.gp-line{display:flex;align-items:baseline;gap:8px}
+.gp-sym{font-weight:750;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:46%}
+.gp-track{font-size:10px;font-weight:800;letter-spacing:.05em;color:var(--gold-deep);background:var(--gold-soft);border-radius:6px;padding:2px 6px;text-transform:uppercase}
+.gp-pct{margin-left:auto;font-size:12.5px;font-weight:750;font-variant-numeric:tabular-nums;color:var(--gold-deep)}
+.gp-bar{height:8px;background:var(--surface-2);border-radius:999px;overflow:hidden;box-shadow:0 0 0 1px var(--line-2);margin:7px 0 5px}
+.gp-fill{height:100%;background:linear-gradient(90deg,var(--gold),var(--gold-deep));border-radius:999px;transition:width .6s ease}
+.gp-meta{font-size:10.5px;color:var(--muted)}
 .tnum{font-variant-numeric:tabular-nums}
 
 header{position:sticky;top:0;z-index:20;height:62px;display:flex;align-items:center;gap:18px;
@@ -463,6 +474,10 @@ dialog::backdrop{background:oklch(40% .03 70/.3);backdrop-filter:blur(3px)}
         <div class="list" id="monRecent"></div>
       </section>
       <div class="col">
+        <section class="card pad">
+          <div class="hd"><h2>毕业进度 · gang.fun</h2><span class="xfer-balance" id="gpAge"></span></div>
+          <div id="gpList"><div class="empty">加载中…</div></div>
+        </section>
         <section class="card pad">
           <div class="hd"><h2>买入 / 提醒事件</h2><button class="ghost" onclick="loadAlerts()">刷新</button></div>
           <div class="list" id="alerts"><div class="empty">尚无事件</div></div>
