@@ -131,7 +131,7 @@ function recordDirect(t) {
 function showView(v) {
   for (const el of document.querySelectorAll('.view')) el.hidden = el.id !== 'view-' + v;
   for (const b of document.querySelectorAll('.nav-item')) b.classList.toggle('active', b.dataset.view === v);
-  if (v === 'monitor') { loadStatus(); loadAlerts(); }
+  if (v === 'monitor') { loadStatus(); loadAlerts(); loadGangProgress(); }
   if (v === 'activity') { loadHistory(); loadAlerts(); }
 }
 window.showView = showView;
@@ -589,6 +589,28 @@ async function loadAlerts() {
   } catch {}
 }
 
+// ---------- gang graduation progress ----------
+async function loadGangProgress() {
+  const box = $('gpList'); if (!box) return;
+  try {
+    const x = await (await fetch('/gang-progress')).json();
+    const tks = x.data?.tokens || [];
+    if (!x.success) { box.innerHTML = '<div class="empty">' + (x.error?.message || '加载失败') + '</div>'; return; }
+    if (!tks.length) { box.innerHTML = '<div class="empty">暂无 ≥3% 进度的币</div>'; $('gpAge').textContent = ''; return; }
+    const usd = n => n == null ? '—' : '$' + Number(n).toLocaleString('en-US', {maximumFractionDigits: 0});
+    box.innerHTML = tks.map(t => {
+      const pct = Math.min(+t.progressPct || 0, 100);
+      return `<div class="gp-item" title="${t.name || ''} · ${t.address}">
+        <div class="gp-line"><span class="gp-sym">${t.symbol || '?'}</span><span class="gp-track">${t.track || ''}</span><span class="gp-pct">${pct.toFixed(1)}%</span></div>
+        <div class="gp-bar"><div class="gp-fill" style="width:${pct}%"></div></div>
+        <div class="gp-meta">剩余 ${usd(t.remainingUsd)} · 24h 量 ${usd(t.volume24hUsd)} · ${t.holders ?? '—'} 人持有</div>
+      </div>`;
+    }).join('');
+    if (x.data?.age) $('gpAge').textContent = '更新于 ' + new Date(x.data.age * 1000).toLocaleTimeString();
+  } catch { box.innerHTML = '<div class="empty">加载失败</div>'; }
+}
+window.loadGangProgress = loadGangProgress;
+
 // ---------- monitor status (four + gang) ----------
 async function loadStatus() {
   try {
@@ -679,6 +701,7 @@ function bootstrap() {
   loadWallet(); loadHistory(); loadStatus(); loadAlerts(); loadBnbPrice();
   setInterval(loadBnbPrice, 30000);
   setInterval(loadStatus, 6000);
+  setInterval(loadGangProgress, 20000);
   setInterval(loadAlerts, 8000);
 }
 window.bootstrap = bootstrap;
