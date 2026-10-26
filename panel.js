@@ -450,6 +450,48 @@ async function refreshTokenCard() {
   } catch { if (seq === tiSeq) card.classList.remove('show'); }
 }
 
+// ---------- quick manual trade (token info card: buy / sell-all, no dialogs) ----------
+async function postQuickSwap(body, btn) {
+  const out = $('qtOut');
+  out.className = 'xfer-out'; out.textContent = '⏳ 提交中…(直调链路含 兑换→授权→买入,约 15-40 秒,别重复点击)';
+  btn.disabled = true;
+  try {
+    const x = await (await fetch('/swap', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)})).json();
+    if (x.success) {
+      const d = x.data || {};
+      const venue = d.venue === 'direct' ? '曲线直调' : '聚合';
+      const tx = d.txHash || d.result?.txHash;
+      const oid = d.orderId;
+      out.className = 'xfer-out';
+      out.innerHTML = `✅ 已提交(${venue})。` + (tx ? `Tx:<a href="https://bscscan.com/tx/${tx}" target="_blank" rel="noopener">${tx.slice(0, 16)}…↗</a>` : (oid ? `订单 ${oid}` : '')) + ' · 等待链上确认,余额将自动刷新';
+      setTimeout(loadWallet, 5000); setTimeout(loadWallet, 20000); loadHistory();
+    } else {
+      out.className = 'xfer-out err';
+      out.textContent = '❌ ' + (x.error?.message || '失败');
+    }
+  } catch (e) {
+    out.className = 'xfer-out err'; out.textContent = '请求失败:' + e.message;
+  } finally { btn.disabled = false; }
+}
+async function quickBuy() {
+  const token = activeCustomToken();
+  const budget = ($('qtBudget').value.trim() || '0');
+  if (!token) { $('qtOut').className = 'xfer-out err'; $('qtOut').textContent = '先在上方粘贴合约地址'; return; }
+  if (!(+budget > 0)) { $('qtOut').className = 'xfer-out err'; $('qtOut').textContent = '买入预算需为正数(BNB)'; return; }
+  await postQuickSwap({fromToken: BNB, toToken: token, qty: budget,
+    slippage: state.slippage === 'auto' ? 'auto' : state.slippage}, $('qtBuy'));
+}
+async function quickSellAll() {
+  const token = activeCustomToken();
+  if (!token) { $('qtOut').className = 'xfer-out err'; $('qtOut').textContent = '先在上方粘贴合约地址'; return; }
+  const bal = state.balances[token.toLowerCase()];
+  if (!bal || !(+bal > 0)) { $('qtOut').className = 'xfer-out err'; $('qtOut').textContent = '钱包没有该代币持仓'; return; }
+  if (!confirm('全部卖出 ' + bal + ' 个该代币?')) return;
+  await postQuickSwap({fromToken: token, toToken: BNB, qty: String(+bal || 1), all: true,
+    slippage: state.slippage === 'auto' ? 'auto' : state.slippage}, $('qtSellAll'));
+}
+window.quickBuy = quickBuy; window.quickSellAll = quickSellAll;
+
 // ---------- token picker: search SHOWS live content ----------
 function openPicker(side) {
   state.picker = side;

@@ -209,6 +209,10 @@ main{position:relative;z-index:1;max-width:1180px;margin:0 auto;padding:clamp(20
 .tokcard-sym{color:var(--muted);font-weight:500}
 .tokcard-addr{font-size:11px;color:var(--faint);margin-top:2px}
 .tokcard-lp{margin-left:auto;font-size:11px;padding:4px 10px;border-radius:999px;background:var(--gold-soft);color:var(--gold-deep);font-weight:700;white-space:nowrap;border:1px solid var(--gold-line)}
+.quick-trade{display:flex;gap:8px;align-items:center;margin-top:14px}
+.quick-trade .amt{width:96px;flex:none;text-align:right}
+.quick-trade .gold-btn{padding:10px 18px;white-space:nowrap}
+.quick-trade .ghost{padding:10px 14px;white-space:nowrap}
 .kgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px}
 .kgrid .c{background:var(--surface-2);border:1px solid var(--line-2);border-radius:10px;padding:10px 11px}
 .kgrid .c .k{font-size:11px;color:var(--faint)}
@@ -412,6 +416,12 @@ dialog::backdrop{background:oklch(40% .03 70/.3);backdrop-filter:blur(3px)}
           </div>
           <div class="kgrid" id="tiGrid"></div>
           <div class="badges" id="tiBadges"></div>
+          <div class="quick-trade">
+            <input class="amt mono" id="qtBudget" value="0.01" inputmode="decimal" title="买入预算(BNB)" aria-label="买入预算 BNB">
+            <button class="gold-btn" id="qtBuy" onclick="quickBuy()">买入 BNB→币</button>
+            <button class="ghost" id="qtSellAll" onclick="quickSellAll()">全部卖出</button>
+          </div>
+          <p class="xfer-out" id="qtOut"></p>
         </div>
       </section>
 

@@ -91,7 +91,34 @@ const balanceOf = async (token, who) => BigInt((await tryCall(token, enc('balanc
 // ---- detection ----
 // Returns {platform, venue:'baw'|'direct', ...route-specific fields}.
 const tail4 = a => a.slice(-4).toLowerCase();
+// ---- detect cache (cross-process, 30s TTL) ----
+// ptah_panel spawns this script per request; one buy used to re-detect 3×
+// (panel route check, then quote(), then trade()). A tiny file cache removes
+// the repeated RPC round-trips without changing behaviour.
+const ROUTE_CACHE = _hd() + '/.config/agent-desk-routes-cache.json';
+const ROUTE_TTL = 30000;
+function readRouteCache(ca) {
+  try { const e = JSON.parse(_rf(ROUTE_CACHE, 'utf8'))[ca]; if (e && Date.now() - e.t < ROUTE_TTL) return e.r; } catch {}
+  return null;
+}
+function writeRouteCache(ca, r) {
+  try {
+    let m = {}; try { m = JSON.parse(_rf(ROUTE_CACHE, 'utf8')); } catch {}
+    m[ca] = {t: Date.now(), r};
+    const ks = Object.keys(m);
+    if (ks.length > 200) for (const k of ks.slice(0, ks.length - 200)) delete m[k];
+    _wf(ROUTE_CACHE, JSON.stringify(m));
+  } catch {}
+}
 export async function detect(ca) {
+  ca = ca.toLowerCase();
+  const hit = readRouteCache(ca);
+  if (hit) return hit;
+  const r = await detectUncached(ca);
+  writeRouteCache(ca, r);
+  return r;
+}
+async function detectUncached(ca) {
   ca = ca.toLowerCase();
   const P = PLATFORMS;
   if (ca === P.units.token.toLowerCase()) return {platform: 'units', venue: 'direct', ...P.units};
