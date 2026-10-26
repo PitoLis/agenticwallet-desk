@@ -178,6 +178,30 @@ const GANG_VT = 1_066_666_666_666_666_666_666_666_667n, GANG_BPS = 10000n, GANG_
 const ceilDiv = (a, b) => (a + b - 1n) / b;
 const gangCurve = c => ({realQuote: BigInt(c.realQuote), sold: BigInt(c.sold), gradAmt: BigInt(c.gradAmt), virtualQuote: BigInt(c.virtualQuote)});
 const gangV2Out = (c0, tokensIn) => { const c = gangCurve(c0); const k = c.virtualQuote * GANG_VT; return c.virtualQuote + c.realQuote - ceilDiv(k, GANG_VT - c.sold + tokensIn); };
+const BNB_ADDR = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
+
+// symbol/decimals of an arbitrary ERC20 (the quote token of ERC20-quoted Gang V2 curves)
+async function erc20Meta(addr) {
+  const s = await tryCall(addr, sel('symbol()'));
+  const d = await tryCall(addr, sel('decimals()'));
+  let symbol = '';
+  try {
+    const b = Buffer.from((s || '0x').slice(2), 'hex');
+    symbol = b.length === 32 ? b.toString('utf8').replace(/\0+$/, '')
+      : b.subarray(64, 64 + Number(BigInt('0x' + (s || '0x0').slice(66, 130)))).toString('utf8');
+  } catch {}
+  return {symbol: symbol || addr.slice(0, 10), dec: d ? Number(BigInt(d)) : 18};
+}
+
+// BNB -> quote-token rate through the baw aggregator (read-only). Returns the
+// human-readable toCoinAmount, or null when the aggregator can't price it.
+async function bawMarketQuote(fromToken, toToken, qty) {
+  const r = await baw(['market-order', 'quote', '--binanceChainId', '56',
+    '--fromTokenQty', String(qty), '--fromToken', fromToken, '--toToken', toToken, '--slippage', '10']);
+  if (!r.success) return null;
+  return r.data?.toCoinAmount != null ? String(r.data.toCoinAmount) : null;
+}
+
 async function gangV2Buy(r, ca, me, quoteIn) {
   const c = gangCurve(r.curve), k = c.virtualQuote * GANG_VT, qR = c.virtualQuote + c.realQuote, tR = GANG_VT - c.sold;
   const tokensOutFor = net => tR - ceilDiv(k, qR + net);
@@ -222,11 +246,21 @@ export async function quote(ca, side, amount) {
       const w = words(await call(r.portal, enc('quoteBuy(address,address,uint256)', r.market, me, inAmt)));
       out = BigInt('0x' + (w[3] || '0')); note = '买到的是曲线份额（非 ERC20），上线后需 claim';
     } else if (r.platform === 'gangv2') {
-      if (!r.quoteIsWbnb) throw new Error('该 Gang V2 曲线以 ' + r.quote + ' 计价，暂只支持 WBNB 计价（BNB 自动 wrap）');
-      const g = await gangV2Buy(r, ca, me, inAmt);
+      // WBNB-quoted curves take the BNB amount as-is; ERC20-quoted curves
+      // (GANG, bStocks, …) first price the BNB budget into the quote token
+      // through the baw aggregator, then run the same curve math.
+      let quoteIn = inAmt, dec = 18, qsym = 'WBNB';
+      if (!r.quoteIsWbnb) {
+        const m = await erc20Meta(r.quote); dec = m.dec; qsym = m.symbol;
+        const got = await bawMarketQuote(BNB_ADDR, r.quote, amount);
+        if (!got) throw new Error('无法获得 BNB→' + qsym + ' 的聚合报价(该计价代币可能没有 DEX 流动性),买入需手动先换出 ' + qsym);
+        quoteIn = toWei(got, dec);
+      }
+      const g = await gangV2Buy(r, ca, me, quoteIn);
       out = g.tokensOut;
       if (out === 0n) throw new Error('当前钱包已达 Gang 每地址 1% 上限');
-      if (g.refund > 0n) note = '曲线剩余额度不足，多出的 ' + fromWei(g.refund) + ' WBNB 会退回';
+      if (g.refund > 0n) note = '曲线剩余额度不足，多出的 ' + fromWei(g.refund, dec) + ' ' + qsym + ' 会留在钱包';
+      if (!r.quoteIsWbnb) note = (note ? note + '；' : '') + '以 ' + qsym + ' 计价：' + amount + ' BNB 按聚合报价 ≈ ' + fromWei(quoteIn, dec) + ' ' + qsym;
     }
   } else {
     const bal = r.platform === 'flapagent'
@@ -242,6 +276,7 @@ export async function quote(ca, side, amount) {
       const q = gangV2Out(r.curve, inAmt);
       out = q - q * 100n / 10000n;
       if (r.quoteIsWbnb) note = '卖出到账为 WBNB';
+      else { const m = await erc20Meta(r.quote); note = '卖出到账为 ' + m.symbol + '（非 BNB，可在兑换卡换回）'; }
     }
     else if (r.platform === 'gang' || r.platform === 'moat') {
       const q = await tryCall(r.pad, enc('quoteSell(address,address,uint256)', ca, me, inAmt));
@@ -365,17 +400,47 @@ export async function trade(ca, side, amount, slippagePct = 10) {
     if (r.platform === 'gang' || r.platform === 'moat') return {route: r, ...(await bawCall(r.pad, enc('buy(address,uint256)', ca, minOut), inAmt))};
     if (r.platform === 'units') return {route: r, ...(await bawCall(r.curve, enc('buy(uint256)', minOut), inAmt))};
     if (r.platform === 'gangv2') {
-      // BNB → WBNB (only the shortfall), exact approve, then pad.buy pulls WBNB via transferFrom.
+      // pad.buy pulls the quote token via transferFrom. WBNB-quoted curves:
+      // wrap the BNB shortfall only, exact approve, buy. ERC20-quoted curves
+      // (GANG / bStocks / …): reuse any held quote token first, swap the BNB
+      // shortfall through the baw aggregator, then approve & buy with whatever
+      // actually landed — every failure says what is left in the wallet.
       const me = await wallet();
-      const have = await balanceOf(WBNB, me);
-      if (have < inAmt) {
-        const wr = await bawCall(WBNB, sel('deposit()'), inAmt - have);
-        if (!wr.ok) return {route: r, ok: false, stage: 'wrap', error: wr.error || 'wrap failed', raw: wr};
-        if (!(await waitFor(async () => await balanceOf(WBNB, me) >= inAmt))) return {route: r, ok: false, stage: 'wrap', error: 'wrap 已提交但 45 秒内未上链确认'};
+      if (r.quoteIsWbnb) {
+        const have = await balanceOf(WBNB, me);
+        if (have < inAmt) {
+          const wr = await bawCall(WBNB, sel('deposit()'), inAmt - have);
+          if (!wr.ok) return {route: r, ok: false, stage: 'wrap', error: wr.error || 'wrap failed', raw: wr};
+          if (!(await waitFor(async () => await balanceOf(WBNB, me) >= inAmt))) return {route: r, ok: false, stage: 'wrap', error: 'wrap 已提交但 45 秒内未上链确认'};
+        }
+        const ap = await ensureAllowance(WBNB, r.pad, inAmt);
+        if (!ap.ok) return {route: r, ok: false, stage: 'approve', error: ap.error};
+        return {route: r, ...(await bawCall(r.pad, enc('buy(address,uint256,uint256)', ca, inAmt, minOut), 0))};
       }
-      const ap = await ensureAllowance(WBNB, r.pad, inAmt);
-      if (!ap.ok) return {route: r, ok: false, stage: 'approve', error: ap.error};
-      return {route: r, ...(await bawCall(r.pad, enc('buy(address,uint256,uint256)', ca, inAmt, minOut), 0))};
+      // ERC20-quoted curve
+      const m = await erc20Meta(r.quote), dec = m.dec, qsym = m.symbol;
+      const got = await bawMarketQuote(BNB_ADDR, r.quote, amount);
+      if (!got) return {route: r, ok: false, stage: 'rate', error: '无法获得 BNB→' + qsym + ' 的聚合报价,买入中止(未花费任何 BNB)'};
+      const planQuote = toWei(got, dec);
+      const before = await balanceOf(r.quote, me);
+      let inQuote = planQuote;
+      if (before < planQuote) {
+        const sw = await baw(['market-order', 'swap', '--binanceChainId', '56',
+          '--fromTokenQty', String(amount), '--fromToken', BNB_ADDR, '--toToken', r.quote,
+          '--slippage', '2', '--mev', 'true', '--gasLevel', 'HIGH']);
+        if (!sw.success) return {route: r, ok: false, stage: 'swap', error: (sw.error?.message) || ('BNB→' + qsym + ' 聚合兑换失败(未花费任何 BNB)'), raw: sw};
+        if (!(await waitFor(async () => await balanceOf(r.quote, me) > before, 60000)))
+          return {route: r, ok: false, stage: 'swap', error: '兑换已提交但 60 秒内未到账,稍后重试买入会直接复用钱包里的 ' + qsym};
+        inQuote = await balanceOf(r.quote, me);  // everything that landed, curve refund stays in wallet
+      }
+      const g2 = await gangV2Buy(r, ca, me, inQuote);
+      if (g2.tokensOut === 0n) return {route: r, ok: false, stage: 'cap', error: '当前钱包已达 Gang 1% 上限;BNB 已换成 ' + fromWei(inQuote, dec) + ' ' + qsym + ' 留在钱包,可换回或在其他 Gang 币上使用'};
+      const minOut2 = g2.tokensOut * BigInt(Math.max(0, Math.round((100 - Number(slippagePct)) * 100))) / 10000n;
+      const ap = await ensureAllowance(r.quote, r.pad, inQuote);
+      if (!ap.ok) return {route: r, ok: false, stage: 'approve', error: (ap.error || '') + '(钱包里的 ' + fromWei(inQuote, dec) + ' ' + qsym + ' 未消耗,重试会直接复用)'};
+      const buyRes = await bawCall(r.pad, enc('buy(address,uint256,uint256)', ca, inQuote, minOut2), 0);
+      if (!buyRes.ok) buyRes.error = (buyRes.error || '') + '(钱包里的 ' + qsym + ' 未消耗,可重试买入)';
+      return {route: r, quoteSymbol: qsym, quoteIn: inQuote.toString(), ...buyRes};
     }
     if (r.platform === 'fouragent') return {route: r, ...(await bawCall(r.core, enc('buyByBudget(address,uint256,uint256,uint256,bytes)', ca, inAmt, minOut, 0n, 160n, 0n), inAmt))};
     if (r.platform === 'cycpad') return {route: r, ...(await bawCall(ca, enc('buyWithQuote(uint256,uint256,uint256)', inAmt, minOut, deadline()), inAmt))};
