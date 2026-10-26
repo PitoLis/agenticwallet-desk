@@ -702,6 +702,7 @@ function bootstrap() {
   setInterval(loadBnbPrice, 30000);
   setInterval(loadStatus, 6000);
   setInterval(loadGangProgress, 20000);
+  setInterval(loadWallet, 30000);   // balances go stale after deposits/swaps; auto-refresh
   setInterval(loadAlerts, 8000);
 }
 window.bootstrap = bootstrap;

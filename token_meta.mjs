@@ -12,13 +12,26 @@ const wallet = JSON.parse(execFileSync('baw', ['wallet', 'address', '--json'], {
   .data.addresses.find(x => x.binanceChainId === '56').address;
 
 const pad = x => x.replace(/^0x/, '').padStart(64, '0');
+// Public BSC RPCs, rotated on failure. dataseed is first (official) but can be
+// unreachable from some networks; publicnode is the resilient fallback.
+const RPCS = ['https://bsc-dataseed.binance.org', 'https://bsc-dataseed1.binance.org',
+              'https://bsc.publicnode.com', 'https://bsc-rpc.publicnode.com'];
+let rpcIdx = 0;
 async function rpc(method, params) {
-  const x = await (await fetch('https://bsc-dataseed.binance.org', {
-    method: 'POST', headers: {'content-type': 'application/json'},
-    body: JSON.stringify({jsonrpc: '2.0', id: 1, method, params}), signal: AbortSignal.timeout(12000)
-  })).json();
-  if (x.error) throw Error(x.error.message);
-  return x.result;
+  let lastErr = null;
+  for (let i = 0; i < RPCS.length; i++) {
+    const url = RPCS[(rpcIdx + i) % RPCS.length];
+    try {
+      const x = await (await fetch(url, {
+        method: 'POST', headers: {'content-type': 'application/json'},
+        body: JSON.stringify({jsonrpc: '2.0', id: 1, method, params}), signal: AbortSignal.timeout(8000)
+      })).json();
+      if (x.error) throw Error(x.error.message);
+      rpcIdx = (rpcIdx + i) % RPCS.length;   // stick with the endpoint that works
+      return x.result;
+    } catch (e) { lastErr = e; }
+  }
+  throw lastErr || Error('all RPCs failed');
 }
 async function c(to, sig, args = '') {
   return rpc('eth_call', [{to, data: '0x' + Buffer.from(keccak_256(new TextEncoder().encode(sig))).toString('hex').slice(0, 8) + args}, 'latest']);
